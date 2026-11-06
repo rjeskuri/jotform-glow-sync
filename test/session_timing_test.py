@@ -12,6 +12,11 @@ Ticket #101 deploys the four fields; its repo side is documentation, checked by 
 the RUNBOOK section "Submission timing in Salesforce" and the plan in docs/plans/ that carries the
 live change (found by its ticket reference, never by a date).
 
+Ticket #102 builds the four timing reports on those fields (Salesforce metadata, deployed on Ryan's
+go); its repo side is the same RUNBOOK section, checked by TimingReportsDocs: the four reports by
+DeveloperName, each with the SOQL check that reproduces it beside its name, and Ryan's answers of
+2026-10-24 on who is left out of the weekly not-submitting list and what "not submitting" means.
+
 Live finding (2026-10-24, after the first deploy): Salesforce's DATEVALUE(<date/time>) converts in the
 org's time zone (America/Los_Angeles), not UTC, so `DATEVALUE(Submitted_At__c)` gave a delay one day
 short for every submission between 00:00 and about 07:00 UTC (153 of 1,123 batches). Ryan kept the UTC
@@ -22,6 +27,7 @@ records why.
 """
 import contextlib
 import copy
+import csv
 import glob
 import importlib
 import io
@@ -843,6 +849,441 @@ class SubmissionTimingDocs(unittest.TestCase):
         self.assertRegex(risks, r"(?i)CreatedDate|permission|filter|formula|deploy|\bfields?\b|\breports?\b",
                          f"{where}: a risk of this change (the `CreatedDate` assumption, a viewer who cannot read a "
                          "field, the deploy)")
+
+
+# Ticket #102: the four timing reports, by DeveloperName (the outline's names)
+REPORTS = ("Clubs_Not_Submitting_Last_Week", "Submissions_by_Club_and_Week",
+           "Late_Submissions_Last_Month", "Submission_Delay_by_Partner_by_Month")
+# The three partners whose clubs report monthly through Salesforce, off the forms since 2026-10-16
+# (RUNBOOK "Clubs that do not use Jotform", DECISIONS 2026-10-06/-15/-19); spelled as their Salesforce
+# accounts are (glow/sf_partners.csv). Partner names, never girls' names.
+MONTHLY_PARTNERS = ("Education and English for You", "Tumaini La Maisha", "Ng'aa Maskani")
+# A SOQL statement in a code span: a `SELECT` that is not a subquery's (not right after an opening
+# parenthesis), to the end of its code span (the next backtick, inline or a fence's)
+STATEMENT = re.compile(r"(?<!\()(?<!\(\s)\bSELECT\b[^`]*")
+# A negation within two words before a phrase, inside its clause: "does not leave out", "never left
+# out", "is not needed", "not descending", "rather than left out". "The clubs that do not report
+# through Jotform are left out" has four words between and affirms.
+NEG_BEFORE = (r"(?:\bnot|\bnever|\bno|\bno longer|\bnothing|\bnor|\bneither|\bwithout|\brather than|\binstead of|n't)"
+              r"\s+(?:[\w'`]+\s+){0,2}$")
+# A run-in label ("**Who is left out** (Ryan, 2026-10-24):") at a sentence's start is not a statement
+LABEL = r"^\*\*[^*]{1,80}\*\*\s*(?:\([^)]*\)\s*)?:?\s*"
+
+
+def partner(name):
+    """A regex for a partner's account name in prose or in SOQL: the apostrophe straight, typographic
+    or SOQL-escaped (`Ng\\'aa Maskani`)."""
+    return re.escape(name).replace("'", r"\\?['’]")
+
+
+def us_partner_accounts():
+    """The Salesforce account names of the partners whose clubs are in the U.S: `appsscript/Regions.gs`
+    PARTNER_REGIONS (region `U.S`; the clubs-off plan: 11 clubs of 6 partners) mapped through
+    `glow/sf_partners.csv` (partner -> account name; a partner without an account has no club
+    accounts to leave out). The repo's own data, not the RUNBOOK: the weekly list's filter on partner
+    account names must name them, or the U.S clubs pad it."""
+    regions = read(os.path.join(REPO, "appsscript", "Regions.gs")).split("PARTNER_REGIONS = {", 1)[1].split("};", 1)[0]
+    us = {p.replace("\\'", "'") for p in re.findall(r"^\s*'((?:[^'\\]|\\.)*)':\s*'U\.S'", regions, re.M)}
+    with open(os.path.join(REPO, "glow", "sf_partners.csv"), encoding="utf-8", newline="") as f:
+        return [row["sf_account_name"] for row in csv.DictReader(f) if row["partner"] in us]
+
+
+def affirms(sentence, pattern, denied=None, flags=re.I):
+    """The first match of `pattern` in `sentence` (case-insensitive unless `flags` says otherwise) that its
+    clause does not deny: no negation within two words before it (NEG_BEFORE) and no `denied` phrase
+    in its clause."""
+    for m in re.finditer(pattern, sentence, flags):
+        start, end = clause_span(sentence, m.start())
+        if re.search(f"(?i){NEG_BEFORE}", sentence[start:m.start()]):
+            continue
+        if denied and re.search(f"(?i){denied}", sentence[start:end]):
+            continue
+        return m
+    return None
+
+
+def without_subqueries(statement):
+    """The SOQL statement with every `(SELECT ...)` subquery, and whatever it nests, taken out."""
+    out, depth, i = [], 0, 0
+    while i < len(statement):
+        if depth == 0 and re.match(r"\(\s*SELECT\b", statement[i:]):
+            depth, i = 1, i + 1
+            continue
+        if depth:
+            depth += {"(": 1, ")": -1}.get(statement[i], 0)
+        else:
+            out.append(statement[i])
+        i += 1
+    return "".join(out)
+
+
+def duplicate_equals(statement):
+    """The fields with more than one `=` predicate in the statement's own WHERE (subqueries taken out):
+    `Attendance_Date__c = LAST_MONTH AND Attendance_Date__c = 2026-09-01` reads two windows at once."""
+    m = re.search(r"\bWHERE\b(.*?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|\bHAVING\b|$)", without_subqueries(statement), re.S)
+    if not m:
+        return []
+    fields = re.findall(r"\b([A-Za-z_][\w.]*)\s*=(?!=)", m.group(1))
+    return sorted({f for f in fields if fields.count(f) > 1})
+
+
+def blocks(part):
+    """The blocks of a Markdown part, each flattened: a paragraph (to a blank line or a heading), a
+    top-level list item with its indented lines, nested items and lazy continuations (as list_items),
+    or a table row. The unit a report's name and its SOQL check must share."""
+    out, current = [], []
+
+    def close():
+        if current:
+            out.append(flat(" ".join(current)))
+            del current[:]
+
+    for line in part.splitlines():
+        if not line.strip() or line.startswith("#"):
+            close()
+        elif line.lstrip().startswith("|"):
+            close()
+            out.append(flat(line))
+        elif LIST_ITEM.match(line):
+            close()
+            current.append(line[LIST_ITEM.match(line).end():])
+        else:
+            current.append(line)
+    close()
+    return out
+
+
+def soql_checks(part):
+    """{report: [statement, ...]}: every SOQL statement of a Markdown part, tied to the report it
+    checks - the last of the four report names before it in the same block (a paragraph, a top-level
+    list item with its nested lines, a table row), else the first named after it in that block. A
+    statement in a block that names no report is nobody's check: a list of names and, elsewhere, a
+    list of queries ties nothing."""
+    checks = {report: [] for report in REPORTS}
+    for block in blocks(part):
+        named = sorted((m.start(), report) for report in REPORTS for m in re.finditer(rf"\b{report}\b", block))
+        for m in STATEMENT.finditer(block):
+            before = [report for at, report in named if at < m.start()]
+            after = [report for at, report in named if at >= m.end()]
+            if before:
+                checks[before[-1]].append(m.group(0).strip())
+            elif after:
+                checks[after[0]].append(m.group(0).strip())
+    return checks
+
+
+class TimingReportsDocs(unittest.TestCase):
+    """Ticket #102: the four timing reports are Salesforce metadata in the Attendance folder, deployed on
+    Ryan's go; what the repo keeps is docs/RUNBOOK.md "Submission timing in Salesforce" (that section
+    alone, to the next `## `). It names the four reports by DeveloperName and their folder, and beside
+    each name - in the same bullet, paragraph or table row, the name first - the SOQL check that
+    reproduces the report's total (DoD: "each report's totals equal its SOQL check"): Accounts of
+    record type Club with a parent and no `Attendance_Batch__c` dated `LAST_WEEK`; batches counted by
+    club and `Session_Week__c`; live Jotform `Success` batches of `LAST_MONTH` with their
+    `Submission_Delay_Days__c`; `AVG` and `MAX` of the delay by partner and `Session_Month__c`. Four
+    distinct statements: one query cannot stand for two reports.
+
+    And it records Ryan's answers of 2026-10-24 (ticket #102, comments): the clubs of the three
+    monthly-reporting partners (Education and English for You, Tumaini La Maisha, Ng'aa Maskani) and
+    the U.S clubs are left out of the weekly not-submitting list by a filter on their partner account
+    names, hand-kept, so a new partner of that kind needs a report edit; `Submissions_by_Club_and_Week`
+    is unaffected; "not submitting last week" is no batch of any status whose session date
+    (`Attendance_Date__c`) is in last week, Sunday to Saturday (`LAST_WEEK`), with no new field; the
+    late report has no cut-off and lists largest delay first. The U.S clubs' partner accounts come from
+    `appsscript/Regions.gs` (region `U.S`) through `glow/sf_partners.csv`, and the weekly list's SOQL
+    must exclude them by `Parent.Name` with the three partners. Meaning, not sentences: tolerant
+    matching on the names and the key words; a statement with a negation right before it ("does not
+    leave out", "not the Attendance folder", "not descending") or denied in its own clause ("changes
+    nothing") does not count, and a never-true predicate (`= null`, `LIMIT 0`) disqualifies a SOQL."""
+
+    RUNBOOK = SubmissionTimingDocs.RUNBOOK
+    HEADING = SubmissionTimingDocs.HEADING
+    FOLDER = r"\bAttendance\b(?: reports?)? folder\b|\bfolder\b[ \"“']*Attendance\b"
+    BATCHES = ("batches (`FROM Attendance_Batch__c`)", r"\bFROM\s+Attendance_Batch__c\b")
+    JOTFORM = ("live Jotform batches (`Creator__c = 'Jotform'`)",
+               r"\bCreator__c\s*=\s*'Jotform'|\bSubmitted_At__c\s*(?:!=|<>)\s*null\b")
+    SUCCESS = ("processed batches (`Processing_Status__c = 'Success'`)", r"\bProcessing_Status__c\s*=\s*'Success'")
+    # what each report's SOQL check must read, as (what, regex) over the statement's text
+    SOQL = {
+        "Clubs_Not_Submitting_Last_Week": (
+            ("Accounts (`FROM Account`)", r"\bFROM\s+Account\b(?!_)"),
+            ("of record type Club (`RecordType.DeveloperName = 'Club'`)", r"\bRecordType\.(?:DeveloperName|Name)\s*=\s*'Club'"),
+            ("with a parent (`ParentId != null`)", r"\b(?:ParentId|Parent\.Id|Parent\.Name)\s*(?:!=|<>)\s*(?:null|'')"),
+            ("without a batch dated last week, Sunday to Saturday - `Id NOT IN (SELECT Account__c FROM Attendance_Batch__c "
+             "WHERE Attendance_Date__c = LAST_WEEK)`, the date inside the subquery (outside it, every club with a batch "
+             "ever is counted as submitting)",
+             r"\bNOT\s+IN\s*\(\s*SELECT\s+Account__c\s+FROM\s+Attendance_Batch__c\s+WHERE\b[^()]*"
+             r"\bAttendance_Date__c\s*=\s*LAST_WEEK\b[^()]*\)"),
+        ),
+        "Submissions_by_Club_and_Week": (
+            BATCHES,
+            ("a record count (`COUNT(Id)`)", r"\bCOUNT\s*\("),
+            ("grouped by partner, then club, and session week (`GROUP BY Account__r.Parent.Name, Account__r.Name, "
+             "Session_Week__c`: rows partner then club)",
+             r"\bGROUP\s+BY\b(?=.*\bParent\.Name\b.*\b(?:Account__r\.Name|Account_Name__c|Account__c)\b)(?=.*\bSession_Week__c\b)"),
+        ),
+        "Late_Submissions_Last_Month": (
+            BATCHES, JOTFORM, SUCCESS,
+            ("with a session date last month (`Attendance_Date__c = LAST_MONTH`)", r"\bAttendance_Date__c\s*=\s*LAST_MONTH\b"),
+            ("the delay among the selected fields (`SELECT ... Submission_Delay_Days__c ... FROM`)",
+             r"\bSELECT\b(?:(?!\bFROM\b).)*\bSubmission_Delay_Days__c\b"),
+            ("the largest delay first (`ORDER BY Submission_Delay_Days__c DESC`)", r"\bORDER\s+BY\s+Submission_Delay_Days__c\s+DESC\b"),
+        ),
+        "Submission_Delay_by_Partner_by_Month": (
+            BATCHES, JOTFORM, SUCCESS,
+            ("the average delay (`AVG(Submission_Delay_Days__c)`)", r"\bAVG\s*\(\s*Submission_Delay_Days__c\s*\)"),
+            ("the maximum delay (`MAX(Submission_Delay_Days__c)`)", r"\bMAX\s*\(\s*Submission_Delay_Days__c\s*\)"),
+            ("grouped by partner and session month (`GROUP BY Account__r.Parent.Name, Session_Month__c`)",
+             r"\bGROUP\s+BY\b(?=.*\bParent\.Name\b|.*\bPartner__c\b)(?=.*\bSession_Month__c\b)"),
+        ),
+    }
+    # what no tied statement may carry: a predicate that is never true, an OR, a LIMIT or HAVING
+    FORBIDDEN_ALL = (
+        ("no predicate that is never true (`= null`, `= ''`): the statement would return nothing", r"(?<![!<>])=\s*(?:null\b|'')"),
+        ("no `OR` (one window, one filter)", r"\bOR\b"),
+        ("no `LIMIT`", r"\bLIMIT\b"),
+        ("no `HAVING`", r"\bHAVING\b"),
+    )
+    NO_LITERAL_PERIOD = ("no literal month, week or date (`Session_Month__c = '2026-09'`, `Attendance_Date__c = 2026-09-01`): the "
+                         "report's window is relative",
+                         r"\bSession_(?:Month|Week)__c\s*(?:=|!=|<>|LIKE\b|IN\b|NOT\s+IN\b)|\bAttendance_Date__c\s*(?:=|>=?|<=?)\s*\d{4}-\d{2}")
+    FORBIDDEN = {
+        "Clubs_Not_Submitting_Last_Week": (
+            ("no `Processing_Status__c` or `Creator__c` in the subquery (a batch of any status, by anyone, counts as submitted)",
+             r"\(\s*SELECT\b[^()]*\b(?:Processing_Status__c|Creator__c)\b"),
+        ),
+        "Submissions_by_Club_and_Week": (
+            ("no `Creator__c` or `Processing_Status__c` (every batch is a submission)", r"\b(?:Creator__c|Processing_Status__c)\b"),
+            NO_LITERAL_PERIOD,
+        ),
+        "Late_Submissions_Last_Month": (NO_LITERAL_PERIOD,),
+        "Submission_Delay_by_Partner_by_Month": (NO_LITERAL_PERIOD,),
+    }
+    # the Parent.Name exclusion's names: inside `Parent.Name NOT IN (...)`, or each `Parent.Name != '...'`
+    EXCLUSION = re.compile(r"\bParent\.Name\s+NOT\s+IN\s*\(([^)]*)\)|\bParent\.Name\s*(?:!=|<>)\s*('(?:[^'\\]|\\.)*')")
+    # a report said to be in another folder: "in the Decommissioned folder", "under folder Private Reports" (case matters:
+    # "in the report folder Attendance" is the Attendance folder)
+    REPORT_REF = "|".join(REPORTS) + r"|\b(?:late|weekly|not-submitting|matrix) (?:list|report)s?\b|\bthe (?:four |new )?reports\b|\bmatrix\b"
+    OTHER_FOLDER = (r"\b(?:in|inside|under|within)\s+(?:the\s+|its\s+|a\s+)?(?!Attendance\b)[A-Z][\w-]*(?: [A-Z][\w-]*)? folder\b|"
+                    r"\b(?:in|inside|under|within)\s+(?:the\s+)?folder\s+[\"“']?(?!Attendance\b)[A-Z][\w-]*")
+    # a Monday-start week affirmed anywhere in the section (a contrast carries "not" or "rather than")
+    MON_SUN = r"\bMonday\b[^.;]{0,20}\bSunday\b|\bMonday[- ]start\w*|\bstarts? on (?:a )?Monday\b|\bfrom Monday\b"
+    # every sentence about the late report, its delay, the list or its sort order
+    ABOUT_LATE = r"\blate\b|\bdelay|\blist\b|\bsort\w*|Late_Submissions_Last_Month"
+    # Ryan's answers, as the words that carry them (case-insensitive over prose() text)
+    LIST = r"Clubs_Not_Submitting_Last_Week|\bweekly\b|\bnot[- ]submitting\b|\bdid not submit\b|\bnot submitted\b|\bno submission\b"
+    OUT = (r"\bleft out\b|\bleaves? out\b|\bleaving out\b|\bexclud\w*|\bfilter\w* out\b|\bomit\w*|\bdrop\w*|\bremoved\b|"
+           r"\btaken out\b|\bkept (?:off|out)\b|\bstays? (?:off|out)\b|\bnot (?:listed|shown|included|counted|in it|in the list|"
+           r"on the list)\b|\bnever (?:show|appear|list)\w*|\bdo(?:es)? not (?:show|appear|list)\w*|\bout of\b")
+    THREE = r"\bthree partners\b|\bmonthly\b|\b38 clubs\b|" + "|".join(partner(n) for n in MONTHLY_PARTNERS)
+    US = r"\bU\.S\b|\bUS\b|\bUnited States\b"
+    NAMES = (r"\b(?:partner|parent|account)s?'?s?\s+(?:account'?s?\s+)?names?\b|\bParent[.·]Name\b|"
+             r"\bnames? of (?:the |their |its )?(?:partner|parent|account)")
+    NEW_PARTNER = (r"\bnew partner\b|\banother partner\b|\bfourth partner\b|\bnext partner\b|\bpartner (?:that|who|which) "
+                   r"(?:later|stops|leaves|moves|joins|starts|switches)\b|\bpartner of (?:that|this|the same) kind\b")
+    EDIT = r"\bedit\w*|\bchang\w*|\bupdat\w*|\badd\w*|\bby hand\b|\bhand-kept\b|\bmaintain\w*|\bamend\w*|\badjust\w*|\bextend\w*"
+    TARGET = r"\breports?\b|\bfilter\w*|Clubs_Not_Submitting_Last_Week|\blist\b"
+    # in the edit's own clause: "changes nothing", "nothing to edit", "needs no change", "added automatically"
+    EDIT_DENIED = (r"\bnothing\b|\bneeds? no\b|\bnot need\w*|\bno (?:report |filter |hand )?(?:edit|change|update|work)\w*|"
+                   r"\bwithout (?:a |any )?(?:report |filter )?(?:edit|change)\w*|\bunchanged\b|\bautomatically\b")
+    UNAFFECTED = (r"\bunaffected(?: by (?:the |that |this |its |any )?(?:partner[- ]name |partner |name )?(?:filter|it))?\b|"
+                  r"\bnot affected(?: by (?:the |that |this |its |any )?(?:partner[- ]name |partner |name )?(?:filter|it))?\b|"
+                  r"\bno (?:such |partner[- ]name |partner |name |this )?filter\b|"
+                  r"\bwithout (?:the|that|this|a|any|such a) (?:partner[- ]name |partner |name )?filter\b|\bnot filtered\b|"
+                  r"\buntouched\b|\bunchanged\b|\bno (?:such )?padding\b|\bonly (?:the )?clubs (?:with|that)\b|"
+                  r"\bclubs with a batch\b|\bnothing (?:is )?left out\b|\bleaves? (?:nothing|no club|no one) out\b|"
+                  r"\bevery club\b|\ball clubs\b|\bas (?:it|they) (?:is|are|stands?)\b")
+    # said of the matrix once UNAFFECTED is taken out: it has / shares / also carries the filter, clubs are missing
+    MATRIX_FILTERED = (r"\b(?:carr\w+|has|have|had|with|share\w*|same|also|too)\b[^,;]{0,30}\bfilter|"
+                       r"\bfilter\w*[^,;]{0,30}\b(?:too|as well|also)\b|\bmissing\b|\bexclud\w*|\bleft out of it\b|"
+                       r"\bleaves? out\b|\bdropped\b|\bomit\w*|\bremoved\b")
+    STATUS = r"\bany status\b|\bwhatever (?:its|the|their) status\b|\bevery status\b|\bregardless of (?:its |the |their )?status\b|\bof any kind\b"
+    NO_BATCH = (r"\b(?:no|without(?: a| an| any)?|not (?:a single|one|any)|zero|never a|lacks?(?: a| any)?|has no|had no|sent no)\s+"
+                r"`?(?:\w+\s+){0,2}`?(?:batch|Attendance_Batch__c|submission)")
+    DATED = r"\bAttendance_Date__c\b|\bsession date\b|\bdated\b|\bsession'?s? day\b|\bdate of the session\b|\bsession (?:falls|is|was|held)\b"
+    LAST_WEEK = r"\blast week\b|\bLAST_WEEK\b|\bthe week\b|\bthat week\b"
+    SUN_SAT = r"\bSunday\b[^.;]{0,20}\bSaturday\b"
+    # the negation governs the field's being needed or added, in the same clause
+    NO_FIELD = (r"\b(?:no|without(?: a| any)?|needs? no|never need\w*(?: a| any)?|not need\w*(?: a| any)?|not require\w*(?: a| any)?)\s+"
+                r"(?:new |extra |additional |further |another |second )?(?:formula |checkbox |date )?fields?\b|"
+                r"\bfields?\b[^.;,]{0,40}\b(?:is|was|were|are)\s+(?:not|never)\s+(?:needed|required|necessary|added|deployed|created|built)\b|"
+                r"In_Last_Week__c[^.;,]{0,60}\b(?:not|never|un)\s*(?:needed|required|necessary|added|deployed|created|built)\b|"
+                r"\b(?:no|not|never|without)\b[^.;,]{0,30}\bIn_Last_Week__c\b")
+    LATE = r"Late_Submissions_Last_Month|\blate (?:report|list|submissions?)\b"
+    NO_CUTOFF = (r"\b(?:no|without(?: a| any)?|not)\s+(?:a\s+)?(?:cut-?off|threshold|minimum|floor|filter on the delay)\b|"
+                 r"\bevery (?:live )?(?:Jotform )?batch\b|\ball (?:live )?(?:Jotform )?batches\b|\bwhatever (?:its|the) delay\b|"
+                 r"\bany delay\b|\bno matter (?:how|the)\b")
+    # a number of days stated as the late report's cut-off ("3 or more days late", "over 7 days", "only batches ...")
+    DAY_THRESHOLD = (r"\b\d+\s*(?:or more |or fewer |\+ ?)?days?\s+(?:late|or more|and more|or longer|behind|of delay|late[rn])\b|"
+                     r"\b(?:above|over|more than|at least|beyond|exceed\w*|greater than|longer than|later than|under|below|less than)"
+                     r"\s+\d+\s*days?\b|\bthreshold of\b|\bcut-?off (?:of|at)\b|\bonly (?:the )?(?:batches|those|rows|submissions)\b")
+    LARGEST = (r"\b(?:largest|biggest|longest|highest|greatest|most delayed|latest|slowest)\s+(?:delays? )?first\b|\bdescending\b|"
+               r"\bORDER BY Submission_Delay_Days__c DESC\b|\bfrom the (?:largest|longest|biggest|highest)\b|"
+               r"\b(?:longest|largest|biggest) (?:delays? )?(?:at the top|on top)\b")
+    SMALLEST = r"\b(?:smallest|shortest|lowest|least|earliest|quickest)\s+(?:delays? )?first\b|\bascending\b|\bASC\b|\bnot descending\b"
+    THRESHOLD = r"\bSubmission_Delay_Days__c\s*(?:>=?|<=?)\s*-?\d"
+
+    def section(self):
+        """The section's raw Markdown; a missing heading fails here (md_part)."""
+        return md_part(self.RUNBOOK, self.HEADING)
+
+    @classmethod
+    def missing(cls, report, statement):
+        """What the statement lacks to be `report`'s check: the features it has not, what it must not carry
+        (FORBIDDEN_ALL, the report's FORBIDDEN), and a field with two `=` predicates in its WHERE."""
+        lacks = [what for what, pattern in cls.SOQL[report] if not re.search(pattern, statement)]
+        lacks += [what for what, pattern in cls.FORBIDDEN_ALL + cls.FORBIDDEN.get(report, ()) if re.search(pattern, statement)]
+        twice = duplicate_equals(statement)
+        if twice:
+            lacks.append(f"one `=` predicate per field in its WHERE (twice: {', '.join(twice)})")
+        return lacks
+
+    @classmethod
+    def excluded_set(cls, statement):
+        """The account names the statement's `Parent.Name` exclusion(s) carry: inside `NOT IN (...)`, or each
+        `!= '...'`; SOQL's `\\'` unescaped."""
+        inside = " ".join(a or b for a, b in cls.EXCLUSION.findall(statement))
+        return {n.replace("\\'", "'") for n in re.findall(r"'((?:[^'\\]|\\.)*)'", inside)}
+
+    @staticmethod
+    def saying(said, *patterns):
+        """The sentences that match every pattern (case-insensitive)."""
+        return [s for s in said if all(re.search(f"(?i){p}", s) for p in patterns)]
+
+    @staticmethod
+    def clause_and_next(sentence, at):
+        """The clause of `sentence` around offset `at` and the one after it: where what is said of a subject
+        ("a new partner of that kind ...") must stand."""
+        start, end = clause_span(sentence, at)
+        nxt = CLAUSE_END.search(sentence, min(end + 1, len(sentence)))
+        return sentence[start:nxt.start() if nxt else len(sentence)]
+
+    def test_the_runbook_lists_the_timing_reports_and_their_soql(self):
+        part = self.section()
+        raw = flat(part)
+        where = f"RUNBOOK section {self.HEADING[3:]!r}"
+        # the four reports by DeveloperName, in the Attendance folder (affirmed: "not the Attendance folder" is not it)
+        for report in REPORTS:
+            with self.subTest(report=report):
+                self.assertIn(report, raw, f"{where}: name the report `{report}` (its DeveloperName)")
+        said = sentences(prose(raw), ".;")
+        self.assertTrue([s for s in said if re.search(r"\breports?\b|" + "|".join(REPORTS), s) and affirms(s, self.FOLDER)],
+                        f"{where}: say the reports are in the Attendance folder, in a sentence about the reports with no "
+                        "negation right before it")
+        elsewhere = [s for s in said if re.search(f"(?i){self.REPORT_REF}", s) and affirms(s, self.OTHER_FOLDER, flags=0)]
+        self.assertFalse(elsewhere, f"{where}: a sentence puts a report in another folder than Attendance: "
+                                    f"{elsewhere[0] if elsewhere else ''!r}")
+        # a SOQL check beside each name: the statement in the report's own bullet, paragraph or table row
+        checks = soql_checks(part)
+        self.assertTrue(any(checks.values()),
+                        f"{where}: a SOQL check (`SELECT ... FROM ...`, in a code span) beside each of the four report "
+                        "names, in the same bullet, paragraph or table row as the name")
+        passing = {}
+        for report in self.SOQL:
+            with self.subTest(report=report):
+                found = checks[report]
+                self.assertTrue(found, f"{where}: `{report}` has no SOQL check beside its name: a `SELECT ... FROM ...` in a "
+                                       "code span, in the same bullet, paragraph or table row as the name and after it")
+                missing = min((self.missing(report, stmt) for stmt in found), key=len)
+                self.assertFalse(missing, f"{where}: the SOQL check beside `{report}` is not that report's check; it lacks: "
+                                          + "; ".join(missing))
+                passing[report] = next(stmt for stmt in found if not self.missing(report, stmt))
+        self.assertEqual(len(set(passing.values())), len(passing),
+                         f"{where}: one SOQL check per report - the same statement stands beside two reports")
+
+    def test_the_runbook_says_who_is_left_out_of_the_weekly_lists(self):
+        part = self.section()
+        raw = flat(part)
+        text = prose(raw).replace("U.S.", "U.S")
+        said = [re.sub(LABEL, "", s) for s in sentences(text, ".;")]
+        where = f"RUNBOOK section {self.HEADING[3:]!r}"
+        us_accounts = us_partner_accounts()
+        self.assertTrue(us_accounts, "appsscript/Regions.gs + glow/sf_partners.csv: no U.S partner with a Salesforce "
+                                     "account (the test's own data; the clubs-off plan counted 6)")
+        # who: the three partners by their account names, and the U.S clubs
+        for name in MONTHLY_PARTNERS:
+            with self.subTest(partner=name):
+                self.assertRegex(raw, partner(name), f"{where}: name the monthly-reporting partner {name} (as its Salesforce "
+                                                     "account is spelled: the filter is on the names)")
+        self.assertRegex(text, self.US, f"{where}: name the U.S clubs (their form is disabled)")
+        # left out of the weekly not-submitting list, said of the three partners' clubs and of the U.S clubs, and
+        # not denied right before ("does not leave out", "never left out", "rather than excluded")
+        self.assertTrue([s for s in self.saying(said, self.LIST, self.THREE) if affirms(s, self.OUT)],
+                        f"{where}: say the three monthly-reporting partners' clubs are left out of the weekly not-submitting "
+                        "list (`Clubs_Not_Submitting_Last_Week`), in one sentence that names the list and the partners, "
+                        "with no negation right before the leaving out")
+        self.assertTrue([s for s in self.saying(said, self.US) if affirms(s, self.OUT)],
+                        f"{where}: say the U.S clubs are left out too, in a sentence")
+        # how: a filter on their partner account names - the names of the ones left out (the three partners or the
+        # U.S clubs named in the sentence), not of the clubs that do report
+        self.assertTrue([s for s in self.saying(said, self.NAMES, f"{self.THREE}|{self.US}") if affirms(s, r"\bfilter\w*")],
+                        f"{where}: say they are left out by a filter on their partner account names (`Parent.Name`), in a "
+                        "sentence that names the three partners (or `monthly`) or the U.S clubs")
+        # hand-kept: a new partner of that kind needs a report edit - the edit affirmed in the new partner's own
+        # clause or the one after it ("hand-kept" said of the filter elsewhere in the sentence is not it)
+        self.assertTrue([s for s in self.saying(said, self.TARGET)
+                         if any(affirms(self.clause_and_next(s, m.start()), self.EDIT, self.EDIT_DENIED)
+                                for m in re.finditer(f"(?i){self.NEW_PARTNER}", s))],
+                        f"{where}: say a new partner of that kind (monthly through Salesforce, or off Jotform) needs the "
+                        "report's filter edited by hand, in a sentence, the edit said of the new partner (\"changes "
+                        "nothing\", \"nothing to edit\", \"no edit\" say the opposite)")
+        # Submissions_by_Club_and_Week is unaffected, and no sentence about it (by name or as "the matrix") gives it
+        # the filter or loses clubs from it
+        matrix = self.saying(said, r"Submissions_by_Club_and_Week|\bmatrix\b")
+        self.assertTrue([s for s in matrix if re.search(f"(?i){self.UNAFFECTED}", s)],
+                        f"{where}: say `Submissions_by_Club_and_Week` is unaffected (it shows only clubs with a batch), in the "
+                        "sentence that names it")
+        filtered = [s for s in matrix if re.search(f"(?i){self.MATRIX_FILTERED}", re.sub(f"(?i){self.UNAFFECTED}", " ", s))]
+        self.assertFalse(filtered, f"{where}: a sentence about `Submissions_by_Club_and_Week` (the matrix) gives it the filter or "
+                                   f"says clubs are missing from it: {filtered[0] if filtered else ''!r}")
+        # the SOQL check of the weekly list leaves them out the same way: a Parent.Name exclusion whose names are
+        # exactly the three partners and the U.S clubs' partner accounts (Regions.gs region U.S, as sf_partners.csv
+        # spells them) - a live Jotform partner in it would hide real non-submitters
+        checks = soql_checks(part)
+        expected = set(MONTHLY_PARTNERS) | set(us_accounts)
+        tied = checks["Clubs_Not_Submitting_Last_Week"]
+        self.assertTrue(tied, f"{where}: no SOQL check beside `Clubs_Not_Submitting_Last_Week` (the first test says where)")
+        names = min((self.excluded_set(stmt) for stmt in tied), key=lambda got: len(got ^ expected))
+        self.assertEqual(names, expected,
+                         f"{where}: the SOQL check beside `Clubs_Not_Submitting_Last_Week` leaves out exactly the partners the "
+                         "report does - `Parent.Name NOT IN (...)` with the three monthly partners and the U.S clubs' partner "
+                         "accounts, nobody else (SOQL escapes the apostrophe: Ng\\'aa Maskani); "
+                         f"missing: {sorted(expected - names)}, extra: {sorted(names - expected)}")
+        # what "not submitting last week" means: NO batch of any status whose session date (Attendance_Date__c) is
+        # in last week; the week Sunday to Saturday (LAST_WEEK), affirmed and with no Monday in the sentence (a
+        # contrast goes in a sentence of its own); no new field for it, the negation on the field itself
+        self.assertTrue(self.saying(said, self.NO_BATCH, self.STATUS, self.DATED, self.LAST_WEEK),
+                        f"{where}: define \"not submitting last week\": NO batch (none, `without a batch`) of any status whose "
+                        "session date (`Attendance_Date__c`) is in last week, in one sentence")
+        self.assertTrue([s for s in self.saying(said, r"\bweek\b|LAST_WEEK") if affirms(s, self.SUN_SAT)
+                         and not re.search(r"(?i)\bMonday\b", s)],
+                        f"{where}: say the week runs Sunday to Saturday (Salesforce's `LAST_WEEK`), in a sentence with no "
+                        "negation right before it and no Monday in it")
+        monday = [s for s in said if affirms(s, self.MON_SUN)]
+        self.assertFalse(monday, f"{where}: a sentence affirms a Monday-start week (a contrast carries `not` or `rather than`): "
+                                 f"{monday[0] if monday else ''!r}")
+        self.assertIn("LAST_WEEK", raw, f"{where}: name the date literal `LAST_WEEK` the report and its check use")
+        self.assertTrue(self.saying(said, self.NO_FIELD, r"\bweek\b|LAST_WEEK|Sunday|Saturday|In_Last_Week__c"),
+                        f"{where}: say no new field (no `In_Last_Week__c` formula) was needed for last week, in a sentence, the "
+                        "negation on the field being needed or added")
+        # the late report: no cut-off, and no sentence about late batches, a delay, the list or its order states a
+        # number of days as one; the largest delay first, and no such sentence says smallest first or ascending
+        self.assertTrue([s for s in self.saying(said, self.LATE) if affirms(s, self.NO_CUTOFF)],
+                        f"{where}: say `Late_Submissions_Last_Month` has no cut-off or threshold - every live Jotform batch of "
+                        "last month with its delay - in a sentence")
+        about = self.saying(said, self.ABOUT_LATE)
+        cut = [s for s in about if re.search(f"(?i){self.DAY_THRESHOLD}", s)]
+        self.assertFalse(cut, f"{where}: a sentence about late batches or the delay states a cut-off in days (Ryan 2026-10-24: "
+                              f"none): {cut[0] if cut else ''!r}")
+        self.assertTrue([s for s in self.saying(said, self.LATE + r"|\bdelay") if affirms(s, self.LARGEST)],
+                        f"{where}: say the late report lists the largest delay first (descending), in a sentence")
+        asc = [s for s in about if re.search(f"(?i){self.SMALLEST}", s)]
+        self.assertFalse(asc, f"{where}: a sentence about late batches, the delay or the list says smallest first or ascending: "
+                              f"{asc[0] if asc else ''!r}")
+        for stmt in checks["Late_Submissions_Last_Month"]:
+            self.assertNotRegex(stmt, self.THRESHOLD,
+                                f"{where}: the late report has no threshold (Ryan 2026-10-24), but its SOQL check compares "
+                                f"`Submission_Delay_Days__c` with a number: {stmt[:120]!r}")
 
 
 if __name__ == "__main__":

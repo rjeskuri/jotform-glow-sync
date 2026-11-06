@@ -14,7 +14,7 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
 - query(soql) / query_all(soql): plain SOQL (SELECT fields FROM object [WHERE ...] with
   AND/OR/NOT/parentheses, =, !=, <, >, IN, NOT IN, LIKE; ORDER BY and LIMIT accepted and ignored)
   over Folder (Id, Name, DeveloperName, Type), Report (Id, DeveloperName, Name, OwnerId - its
-  folder's id - FolderName, LastRunDate), Dashboard (Id, DeveloperName, Title, FolderId,
+  folder's id - FolderName, LastRunDate, Description), Dashboard (Id, DeveloperName, Title, FolderId,
   FolderName, Type) and DashboardComponent (Id, DashboardId, CustomReportId, and the relationship
   Dashboard.*). Any other object is an AssertionError (recorded first).
 - call(method, path, body) -> (status, answer), paths under /services/data/v67.0:
@@ -26,13 +26,23 @@ The fake org (ReportOrg) is Salesforce as far as this tool may see it, after the
     "dashboardMetadata": {"id": <new id>, ...}, ...}; any other key in the body is refused
     400 JSON_PARSER_ERROR, as the API refused a dashboard's name and description.
   * PATCH analytics/reports/<id>, body {"reportMetadata": {...}}: folderId, name, description
-    change; 200 with the report's metadata. drift[id] = "folder" | "name" makes the PATCH answer
+    change; a body without "description" CLEARS the report's description (to None), as Salesforce
+    did to 32 moved reports (#142); 200 with the report's metadata. drift[id] = "folder" | "name" makes the PATCH answer
     200 while that field stays as it was (a failed read-back); drift[id] = "echo" answers 200 with
     the values asked for while nothing is stored (only a SOQL read-back sees it); refuse_patch
-    makes it 400. misplace = True: a clone answers 200 with the folder asked for, but lands in its
+    makes it 400. desc_drift[id] = a DESC_DRIFT mode stores, instead of the description sent, what
+    that mode makes of it ("drop": None, as a Salesforce that ignored it blanks it; "empty": "";
+    "cut": its first half; "other": another text; "blank swap": "" for None and None for "", the
+    same blank), while the PATCH answer echoes the description sent (only a read-back sees it).
+    misplace = True: a clone answers 200 with the folder asked for, but lands in its
     source's folder (only a SOQL read-back sees it).
   * PATCH analytics/dashboards/<id>: always 400 JSON_PARSER_ERROR (the proof, steps 3-5).
-  * GET .../describe answers a small describe; any other GET (a report run returns its rows) and
+  * GET .../describe answers a small describe; a report's reportMetadata.description is its stored
+    description as is (None or "" when it has none); refuse_describe (ids) makes a report's
+    describe answer 500; describe_shape[id] = "no description" answers 200 with a reportMetadata
+    that has no "description" key, "no reportMetadata" answers 200 without a reportMetadata.
+    on_patch[id] = f: f() runs once when that report's PATCH arrives, before it is handled (a
+    description edited in Salesforce while the run is under way). Any other GET (a report run returns its rows) and
     any other method is an AssertionError (recorded first).
   Every answer carries a fictional staff name (CANARY): the tool must never print an answer.
 
@@ -53,7 +63,9 @@ import string
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from xml.sax.saxutils import escape as sax_escape
 
 # first: importing helpers.common puts the repository root and tools/ on sys.path
 from helpers.common import REPO, md_part, read
@@ -291,6 +303,8 @@ class ReportOrg:
     def __init__(self, decom_reports=1, decom_dashboards=1):
         self.calls, self.seen = [], []
         self.drift, self.refuse_patch, self.misplace = {}, set(), False
+        self.refuse_describe, self.describe_shape, self.on_patch = set(), {}, {}
+        self.desc_drift = {}
         self.folders, self.fid = [], {}
         for key, name, kind in FOLDERS:
             self.add_folder(key, name, kind)
@@ -397,10 +411,17 @@ class ReportOrg:
             return self.patch_report(m.group(2), body)
         m = re.fullmatch(r"analytics/(reports|dashboards)/(\w+)/describe", rest)
         if method == "GET" and m:
+            if m.group(1) == "reports" and m.group(2) in self.refuse_describe:
+                return 500, [{"errorCode": "UNKNOWN_EXCEPTION", "message": f"try again ({CANARY})"}]
             if m.group(1) == "reports" and self.report(m.group(2)):
                 r = self.report(m.group(2))
-                return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
-                             "runningUser": {"name": CANARY}}
+                meta = {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"], "description": r["Description"]}
+                shape = self.describe_shape.get(r["Id"])
+                if shape == "no description":
+                    del meta["description"]
+                if shape == "no reportMetadata":
+                    return 200, {"reportExtendedMetadata": {}, "runningUser": {"name": CANARY}}
+                return 200, {"reportMetadata": meta, "runningUser": {"name": CANARY}}
             if m.group(1) == "dashboards" and self.dashboard(m.group(2)):
                 d = self.dashboard(m.group(2))
                 return 200, {"id": d["Id"], "name": d["Title"], "folderId": d["FolderId"],
@@ -442,6 +463,9 @@ class ReportOrg:
                      "runningUser": {"name": CANARY}}
 
     def patch_report(self, rid, body):
+        hook = self.on_patch.pop(rid, None)
+        if hook:
+            hook()
         r = self.report(rid)
         if r is None:
             return 404, [{"errorCode": "NOT_FOUND", "message": "no such report"}]
@@ -461,10 +485,40 @@ class ReportOrg:
             r["OwnerId"] = meta["folderId"]
         if "name" in meta and drift != "name":
             r["Name"] = meta["name"].strip()
-        if "description" in meta:
-            r["Description"] = meta["description"]
-        return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"]},
+        # a PATCH that leaves the description out blanks it: Salesforce did so to 32 moved reports (#142)
+        r["Description"] = meta.get("description")
+        if rid in self.desc_drift:      # Salesforce kept something other than the description sent
+            r["Description"] = DESC_DRIFT[self.desc_drift[rid]](meta.get("description"))
+        return 200, {"reportMetadata": {"id": r["Id"], "name": r["Name"], "folderId": r["OwnerId"],
+                                        "description": meta.get("description")},
                      "runningUser": {"name": CANARY}}
+
+
+DESC_DRIFT = {   # desc_drift modes: the description sent -> the one Salesforce keeps
+    "drop": lambda sent: None,
+    "empty": lambda sent: "",
+    "cut": lambda sent: (sent or "")[:len(sent or "") // 2],
+    "other": lambda sent: f"Kept for the regional review ({fresh_id('')})",
+    "blank swap": lambda sent: "" if sent is None else None if sent == "" else sent,
+}
+
+
+DESCRIPTION_SHAPES = [   # {t}: a fresh token, so a description cannot be hard-coded
+    "Club meetings per month, for the regional leads ({t})",
+    "Girls attended by partner\nsince the 2025 intake ({t})",
+    "Côte d'Ivoire & Ghana clubs: \"monthly\" totals, 100% ({t})",
+    "({t}) Sessions observed by partner and region, kept for the yearly review; " * 4,
+]
+
+
+def set_descriptions(org, keys):
+    """A fictional description, different for each report and each call, on the reports of `keys`
+    (fixture keys); {report id: description}."""
+    out = {}
+    for n, key in enumerate(keys):
+        text = DESCRIPTION_SHAPES[n % len(DESCRIPTION_SHAPES)].format(t=fresh_id(""))[:255]
+        org.report(org.rid[key])["Description"] = out[org.rid[key]] = text
+    return out
 
 
 def rows_on_disk(path):
@@ -690,7 +744,10 @@ class Move(Harness):
             want = {"folderId": folder_id}
             if label:
                 want["name"] = label
-            self.assertEqual(sent[0][2], {"reportMetadata": want})
+            self.assertEqual(set(sent[0][2]), {"reportMetadata"})
+            meta = dict(sent[0][2]["reportMetadata"])
+            meta.pop("description", None)       # the description it carries: KeepDescription (#142)
+            self.assertEqual(meta, want)
             r = o.report(rid)
             self.assertIsNotNone(r, "the same Id after the move")
             self.assertEqual(r["OwnerId"], folder_id)
@@ -1126,6 +1183,376 @@ class UndoFromPublicReports(Harness):
         self.assertEqual(self.writes_since(sent), [], "every move was undone already")
 
 
+class KeepDescription(Harness):
+    """#142: Salesforce blanks a report's description when a PATCH of its reportMetadata leaves the
+    description out (12 of 18 and 20 of 29 moved reports lost theirs). A move or an undo carries the
+    description the report's describe (GET analytics/reports/<id>/describe) answers, read per report."""
+
+    def descs(self, ids):
+        return {rid: self.org.report(rid)["Description"] for rid in ids}
+
+    def sent_to(self, patches, rid):
+        sent = [p for p in patches if p[1] == f"{API_ROOT}analytics/reports/{rid}"]
+        self.assertEqual(len(sent), 1, f"one PATCH for {rid}")
+        self.assertEqual(set(sent[0][2]), {"reportMetadata"})
+        return sent[0][2]["reportMetadata"]
+
+    def test_move_apply_carries_each_reports_own_description_in_its_patch(self):
+        o = self.org
+        # a relabel, a retirement with the label kept, a relabel, a move with the label kept
+        rows = self.move_plan() + [("report", o.rid["observed"], "GLOW Club Reports", "")]
+        desc = set_descriptions(o, ["meet", "mentors", "stories", "observed"])
+        others = self.descs(r["Id"] for r in o.reports if r["Id"] not in desc)
+        path = self.plan(rows)
+
+        before = o.state()
+        self.ok("move", "--plan", path, "--vpn-off")
+        self.assert_nothing_written(before)
+        self.assertEqual(self.descs(desc), desc, "a dry run changes no description")
+
+        self.ok("move", "--plan", path, "--vpn-off", "--apply")
+        patches = o.patches()
+        self.assertEqual(len(patches), len(rows))
+        for _, rid, to, label in rows:
+            meta = self.sent_to(patches, rid)
+            how = "relabelled" if label else "label kept"
+            self.assertEqual(meta.get("description"), desc[rid],
+                             f"{rid} ({how}): the PATCH carries the description its describe answered")
+            self.assertEqual(meta.get("folderId"), o.fid[self.target(to)])
+            if label:
+                self.assertEqual(meta.get("name"), label)
+            self.assertEqual(o.report(rid)["OwnerId"], o.fid[self.target(to)])
+            self.assertEqual(o.report(rid)["Description"], desc[rid], f"{rid} ({how}) keeps its description")
+        self.assertEqual(self.descs(others), others, "the reports outside the plan are untouched")
+
+    def test_undo_apply_carries_each_reports_current_description_in_its_patch(self):
+        o = self.org
+        original = o.state()[0]
+        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["observed"]
+        set_descriptions(o, ["mentors", "stories", "observed"])
+        self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories")],
+                          [("report", c, "Shared Name", "Implementation by month")]])
+        # edited in Salesforce after the move: the undo carries what each report holds now
+        now = set_descriptions(o, ["mentors", "stories", "observed"])
+
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off")
+        self.assertEqual(self.writes_since(sent), [], "a dry run sends no write")
+        self.assertEqual(self.descs(now), now, "a dry run changes no description")
+
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        patches = self.writes_since(sent)
+        self.assertEqual([p[1] for p in patches], [f"{API_ROOT}analytics/reports/{rid}" for rid in (c, b, a)])
+        for rid in (c, b, a):
+            meta = self.sent_to(patches, rid)
+            self.assertEqual(meta.get("description"), now[rid],
+                             f"{rid}: the undo's PATCH carries the description its describe answers now")
+        self.assertEqual(self.descs(now), now, "every report keeps its description through the undo")
+        self.assertEqual(o.state()[0], original, "and is back where and as it was")
+
+    def test_a_report_without_a_description_is_not_given_one(self):
+        """None (or blank) in the PATCH, or no description key at all: either keeps it blank."""
+        o = self.org
+        meet, mentors, stories = o.rid["meet"], o.rid["mentors"], o.rid["stories"]
+        o.report(meet)["Description"] = None
+        o.report(mentors)["Description"] = ""
+        desc = set_descriptions(o, ["stories"])
+        self.ok("move", "--plan", self.plan(self.move_plan()), "--vpn-off", "--apply")
+        for rid in (meet, mentors):
+            meta = self.sent_to(o.patches(), rid)
+            self.assertIn(meta.get("description"), (None, ""), f"{rid}: no description made up: {meta}")
+            self.assertIn(o.report(rid)["Description"], (None, ""), rid)
+        self.assertEqual(self.sent_to(o.patches(), stories).get("description"), desc[stories])
+        self.assertEqual(o.report(stories)["Description"], desc[stories])
+
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        patches = self.writes_since(sent)
+        for rid in (meet, mentors):
+            meta = self.sent_to(patches, rid)
+            self.assertIn(meta.get("description"), (None, ""), f"{rid}: no description made up by the undo: {meta}")
+            self.assertIn(o.report(rid)["Description"], (None, ""), rid)
+        self.assertEqual(self.sent_to(patches, stories).get("description"), desc[stories])
+        self.assertEqual(o.report(stories)["Description"], desc[stories])
+
+    def moved_three(self):
+        """mentors, stories, observed moved (labels within 40: undo can put them back); undo's order
+        (last first) and the state before the moves."""
+        o = self.org
+        original = o.state()[0]
+        a, b, c = o.rid["mentors"], o.rid["stories"], o.rid["observed"]
+        self.apply_moves([[("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories")],
+                          [("report", c, "Shared Name", "Implementation by month")]])
+        return [c, b, a], original
+
+    def edit_on_patch(self, order):
+        """While each report's PATCH is handled, the next report's description is edited in
+        Salesforce; {report id: the description it holds when its own turn comes}."""
+        o = self.org
+        expect = {order[0]: o.report(order[0])["Description"]}
+        for k in range(len(order) - 1):
+            nxt = order[k + 1]
+            expect[nxt] = DESCRIPTION_SHAPES[k % len(DESCRIPTION_SHAPES)].format(t=fresh_id("edited "))[:255]
+            o.on_patch[order[k]] = (lambda rid, text: lambda: o.report(rid).__setitem__("Description", text))(
+                nxt, expect[nxt])
+        return expect
+
+    def test_each_report_is_described_just_before_its_own_patch(self):
+        """A description read once up front for every report is stale by the time a later report's
+        PATCH goes out: the one sent is the one the report holds at its turn."""
+        o = self.org
+        rows = self.move_plan() + [("report", o.rid["observed"], "GLOW Club Reports", "")]
+        set_descriptions(o, ["meet", "mentors", "stories", "observed"])
+        expect = self.edit_on_patch([rid for _, rid, _, _ in rows])
+        self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(o.on_patch, {}, "every PATCH was sent")
+        for _, rid, _, _ in rows:
+            self.assertEqual(self.sent_to(o.patches(), rid).get("description"), expect[rid],
+                             f"{rid}: the move carries the description its report holds at its turn")
+        self.assertEqual(self.descs(expect), expect, "each report keeps the description it holds now")
+
+        o = self.fresh()
+        order, original = self.moved_three()
+        set_descriptions(o, ["mentors", "stories", "observed"])
+        expect = self.edit_on_patch(order)
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        patches = self.writes_since(sent)
+        for rid in order:
+            self.assertEqual(self.sent_to(patches, rid).get("description"), expect[rid],
+                             f"{rid}: the undo carries the description its report holds at its turn")
+        self.assertEqual(self.descs(expect), expect)
+        self.assertEqual(o.state()[0], original)
+
+    def test_a_later_run_reads_the_description_again(self):
+        """Nothing read by one run is reused by the next: each run sends what the report holds then,
+        a description added, changed or cleared in between included."""
+        o = self.org
+        a, b = o.rid["mentors"], o.rid["stories"]
+        rows = [("report", a, "Decommissioned", ""), ("report", b, "GLOW Club Reports", "Stories")]
+        blank = (None, "")
+        steps = [   # (the run, a's description before it, b's): text = a fresh one
+            ("move", "text", "text"),
+            ("undo", "text", None),
+            ("move", "", "text"),
+            ("undo", "text", "text"),
+            ("move", None, ""),
+        ]
+        for n, (run, da, db) in enumerate(steps):
+            now = {}
+            for rid, d, key in ((a, da, "mentors"), (b, db, "stories")):
+                if d == "text":
+                    now.update(set_descriptions(o, [key]))
+                else:
+                    o.report(rid)["Description"] = now[rid] = d
+            sent = len(o.calls)
+            if run == "move":
+                self.ok("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            else:
+                self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            patches = self.writes_since(sent)
+            for rid in (a, b):
+                got = self.sent_to(patches, rid).get("description")
+                if now[rid] in blank:
+                    self.assertIn(got, blank, f"step {n} ({run}): {rid} is blank now, the PATCH says {got!r}")
+                else:
+                    self.assertEqual(got, now[rid], f"step {n} ({run}): {rid}'s description now")
+                self.assertEqual(o.report(rid)["Description"] or None, now[rid] or None, f"step {n} ({run})")
+
+    def test_a_describe_that_does_not_answer_stops_before_that_reports_patch(self):
+        """Without the description, a PATCH would blank it: refuse rather than guess. As a failed
+        write does, it stops the run there: the reports before it are moved, read back and on the
+        ledger as ok; nothing is sent for it or after it; undo puts back what was moved."""
+        for bad in (0, 1, 2):
+            o = self.fresh()
+            original = o.state()[0]
+            rows = self.move_plan()
+            desc = set_descriptions(o, ["meet", "mentors", "stories"])
+            o.refuse_describe.add(rows[bad][1])
+            said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            done = [rid for _, rid, _, _ in rows[:bad]]
+            self.assertEqual([p[1] for p in o.patches()], [f"{API_ROOT}analytics/reports/{rid}" for rid in done],
+                             f"row {bad}: the reports before it moved, none at or after it:\n{said}")
+            for _, rid, to, _ in rows[:bad]:
+                self.assertEqual(self.sent_to(o.patches(), rid).get("description"), desc[rid])
+                self.assertEqual(o.report(rid)["OwnerId"], o.fid[self.target(to)])
+            for _, rid, _, _ in rows[bad:]:
+                self.assertEqual(o.state()[0][rid], original[rid], f"row {bad}: {rid} stays where it was")
+            ok = [(x["action"], x["id"]) for x in rows_on_disk(self.ledger_path) if x["status"] == "ok"]
+            self.assertEqual(ok, [("move", rid) for rid in done], f"row {bad}: the ledger's ok rows")
+            self.assertEqual(self.descs(desc), desc, f"row {bad}: every description is kept")
+            self.assertIn(rows[bad][1], said, "the refusal names the report")
+
+            o.refuse_describe.clear()
+            if not os.path.exists(self.ledger_path):
+                self.assertEqual(done, [], "a move without its ledger row")
+                continue
+            self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            self.assertEqual(o.state()[0], original, f"row {bad}: undo puts back what was moved")
+            self.assertEqual(self.descs(desc), desc)
+
+        # the undo too, whichever report's describe fails: the ones undone before it stay undone
+        for bad in range(3):
+            o = self.fresh()
+            order, original = self.moved_three()
+            desc = set_descriptions(o, ["mentors", "stories", "observed"])
+            moved = o.state()[0]
+            rows_before = len(self.ledger())
+            o.refuse_describe.add(order[bad])
+            sent = len(o.calls)
+            said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            done = order[:bad]
+            self.assertEqual([p[1] for p in self.writes_since(sent)],
+                             [f"{API_ROOT}analytics/reports/{rid}" for rid in done],
+                             f"undo, {bad} before the bad one: those sent, none at or after it:\n{said}")
+            ok = [(x["action"], x["id"]) for x in self.ledger()[rows_before:] if x["status"] == "ok"]
+            self.assertEqual(ok, [("undo", rid) for rid in done], f"undo, {bad} before: the ledger's ok rows")
+            for rid in order:
+                self.assertEqual(o.state()[0][rid], original[rid] if rid in done else moved[rid], rid)
+            self.assertEqual(self.descs(desc), desc)
+            self.assertIn(order[bad], said)
+
+    def test_a_describe_without_the_description_is_refused(self):
+        """A describe that answers 200 without reportMetadata.description says nothing of the
+        description: no PATCH for that report (it would blank it), the run stops there."""
+        for shape in ("no description", "no reportMetadata"):
+            o = self.fresh()
+            original = o.state()[0]
+            rows = self.move_plan()
+            desc = set_descriptions(o, ["meet", "mentors", "stories"])
+            bad = rows[1][1]
+            o.describe_shape[bad] = shape
+            said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            self.assertEqual([p[1] for p in o.patches()], [f"{API_ROOT}analytics/reports/{rows[0][1]}"],
+                             f"{shape}: only the report before it is sent:\n{said}")
+            self.assertEqual(self.sent_to(o.patches(), rows[0][1]).get("description"), desc[rows[0][1]])
+            for _, rid, _, _ in rows[1:]:
+                self.assertEqual(o.state()[0][rid], original[rid], f"{shape}: {rid} stays where it was")
+            self.assertEqual(self.descs(desc), desc, shape)
+            self.assertIn(bad, said, f"{shape}: the refusal names the report")
+
+            o = self.fresh()
+            order, _ = self.moved_three()
+            desc = set_descriptions(o, ["mentors", "stories", "observed"])
+            moved = o.state()
+            o.describe_shape[order[0]] = shape
+            sent = len(o.calls)
+            said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            self.assertEqual(self.writes_since(sent), [], f"{shape}: the undo sends nothing:\n{said}")
+            self.assertEqual(o.state(), moved)
+            self.assertEqual(self.descs(desc), desc)
+            self.assertIn(order[0], said)
+
+    # -- the read-back checks the description too (#142 review: 32 blanked descriptions all read back ok)
+    def assert_no_description_printed(self, said, texts):
+        """The tool prints no answer: no description (the one sent, the one read back), no 30-character
+        start of one, no 18-character token of one is in its output."""
+        for text in texts:
+            if not text:
+                continue
+            self.assertNotIn(text, said, "the tool printed a description")
+            self.assertNotIn(text[:30], said, "the tool printed the start of a description")
+            for token in re.findall(r"[A-Za-z0-9]{18}", text):
+                self.assertNotIn(token, said, "the tool printed part of a description")
+
+    def test_a_move_whose_description_does_not_read_back_stops_the_run(self):
+        """A PATCH answered 200 whose description Salesforce dropped or changed (the PATCH answer
+        echoes the one sent: only a read-back sees it) is a failed write, as a wrong folder or label
+        is: its ledger row is failed, nothing is sent after it, the moves before it stand (ok)."""
+        for bad, mode in ((0, "drop"), (1, "other"), (2, "cut"), (1, "empty"), (2, "drop"), (0, "other")):
+            o = self.fresh()
+            original = o.state()[0]
+            rows = self.move_plan()
+            desc = set_descriptions(o, ["meet", "mentors", "stories"])
+            rid = rows[bad][1]
+            o.desc_drift[rid] = mode
+            said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+            where = f"row {bad}, {mode}"
+            self.assertEqual([p[1] for p in o.patches()],
+                             [f"{API_ROOT}analytics/reports/{x}" for _, x, _, _ in rows[:bad + 1]],
+                             f"{where}: nothing sent after the report whose description did not read back:\n{said}")
+            self.assertEqual(self.sent_to(o.patches(), rid).get("description"), desc[rid], where)
+            ledger = self.ledger()
+            self.assertEqual([(x["action"], x["id"], x["status"]) for x in ledger],
+                             [("move", x, "ok") for _, x, _, _ in rows[:bad]] + [("move", rid, "failed")], where)
+            for _, x, to, _ in rows[:bad]:
+                self.assertEqual(o.report(x)["OwnerId"], o.fid[self.target(to)], f"{where}: {x} stays moved")
+                self.assertEqual(o.report(x)["Description"], desc[x], f"{where}: {x} keeps its description")
+            for _, x, _, _ in rows[bad + 1:]:
+                self.assertEqual(o.state()[0][x], original[x], f"{where}: {x} is not touched")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            self.assertIn(rid, said, f"{where}: the refusal names the report")
+            self.assert_no_description_printed(said, list(desc.values()) + [o.report(rid)["Description"]])
+
+    def test_an_undo_whose_description_does_not_read_back_stops_the_run(self):
+        """The same for undo: the undo rows before it are ok and stay undone, its row is failed,
+        nothing is sent after it, the reports after it stay moved."""
+        for bad, mode in ((0, "drop"), (1, "cut"), (2, "other"), (0, "empty"), (1, "drop")):
+            o = self.fresh()
+            order, original = self.moved_three()
+            desc = set_descriptions(o, ["mentors", "stories", "observed"])
+            moved = o.state()[0]
+            rows_before = len(self.ledger())
+            rid = order[bad]
+            o.desc_drift[rid] = mode
+            sent = len(o.calls)
+            said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+            where = f"undo {bad}, {mode}"
+            patches = self.writes_since(sent)
+            self.assertEqual([p[1] for p in patches], [f"{API_ROOT}analytics/reports/{x}" for x in order[:bad + 1]],
+                             f"{where}: nothing sent after the report whose description did not read back:\n{said}")
+            self.assertEqual(self.sent_to(patches, rid).get("description"), desc[rid], where)
+            added = self.ledger()[rows_before:]
+            self.assertEqual([(x["action"], x["id"], x["status"]) for x in added],
+                             [("undo", x, "ok") for x in order[:bad]] + [("undo", rid, "failed")], where)
+            for x in order[:bad]:
+                self.assertEqual(o.state()[0][x], original[x], f"{where}: {x} stays undone")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            for x in order[bad + 1:]:
+                self.assertEqual(o.state()[0][x], moved[x], f"{where}: {x} stays moved")
+                self.assertEqual(o.report(x)["Description"], desc[x], where)
+            self.assertIn(rid, said, f"{where}: the refusal names the report")
+            self.assert_no_description_printed(said, list(desc.values()) + [o.report(rid)["Description"]])
+
+    def test_a_blank_description_read_back_as_the_other_blank_is_no_mismatch(self):
+        """Salesforce may answer None or "" for an empty description: a blank sent as None that
+        reads back as "" (or sent as "" and read back as None) is the same blank, its row ok. A text
+        that reads back blank after them still stops the run there."""
+        o = self.org
+        meet, mentors, stories, observed = (o.rid[k] for k in ("meet", "mentors", "stories", "observed"))
+        rows = self.move_plan() + [("report", observed, "GLOW Club Reports", "")]
+        o.report(meet)["Description"] = None
+        o.report(mentors)["Description"] = ""
+        desc = set_descriptions(o, ["stories", "observed"])
+        o.desc_drift.update({meet: "blank swap", mentors: "blank swap", observed: "drop"})
+        said = self.refused("move", "--plan", self.plan(rows), "--vpn-off", "--apply")
+        self.assertEqual(o.report(meet)["Description"], "", "the fake swapped the blank (None sent)")
+        self.assertIsNone(o.report(mentors)["Description"], "the fake swapped the blank (\"\" sent)")
+        self.assertEqual([(x["id"], x["status"]) for x in self.ledger()],
+                         [(meet, "ok"), (mentors, "ok"), (stories, "ok"), (observed, "failed")],
+                         f"a blank read back as the other blank is no mismatch:\n{said}")
+        self.assertIn(observed, said)
+        self.assertEqual(o.report(stories)["Description"], desc[stories])
+
+        # the undo: blanks first (undo is last first), then a text that reads back blank
+        o = self.fresh()
+        order, original = self.moved_three()        # observed, stories, mentors
+        o.report(order[0])["Description"] = None
+        o.report(order[1])["Description"] = ""
+        desc = set_descriptions(o, ["mentors"])
+        o.desc_drift.update({order[0]: "blank swap", order[1]: "blank swap", order[2]: "drop"})
+        rows_before = len(self.ledger())
+        said = self.refused("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([(x["id"], x["status"]) for x in self.ledger()[rows_before:]],
+                         [(order[0], "ok"), (order[1], "ok"), (order[2], "failed")],
+                         f"a blank read back as the other blank is no mismatch:\n{said}")
+        for x in order[:2]:
+            self.assertEqual(o.state()[0][x], original[x], f"{x} is undone")
+        self.assertIn(order[2], said)
+        self.assert_no_description_printed(said, list(desc.values()))
+
+
 class LedgerDurability(Harness):
     """A write's ledger row is on disk (status "sending", as tools/sf_backfill.py's) BEFORE its
     request goes out, and finished (ok or failed, in place: the finished ledger keeps one row per
@@ -1424,6 +1851,642 @@ class Refusals(Harness):
             self.assertFalse(os.path.exists(self.ledger_path), argv)
 
 
+# ---- restore-descriptions (#142, outline step 2) --------------------------------------------------
+# `restore-descriptions --vpn-off --from DIR [--from DIR ...] [--apply] [--limit N]` puts back the
+# descriptions `move` blanked, from local Salesforce metadata retrieves (sfdx project dirs:
+# force-app/main/default/reports/<FolderDevName>/<ReportDevName>.report-meta.xml). Ryan's decision
+# (2026-10-25, on #142): the kept reports only, never the ones in "Decommissioned", with the stray
+# leading bullet characters stripped. Pinned here (the choices the ticket left open):
+# - a report in the protected folder "Attendance" is SKIPPED and counted as "protected" (not refused);
+# - the dry run prints the counts as "<word>: N" or "N <word>" with the words planned, already
+#   described, decommissioned, not found, protected (protected may be left out when it is 0);
+# - a saved name no report has is named in the output (a developer name, never a description);
+# - a description that is blank once its bullets are stripped is ignored, as a file without one;
+# - a file that is not *.report-meta.xml (a dashboard's) is not read, even with a report's name.
+# Every text here is fictional and fresh per run: a tool that hard-codes one cannot pass.
+REPORT_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<Report xmlns="http://soap.sforce.com/2006/04/metadata">
+    <columns>
+        <field>DHIS2__c$Partner__c</field>
+    </columns>
+{description}    <format>Summary</format>
+    <name>{name}</name>
+    <reportType>CustomEntity$DHIS2__c</reportType>
+    <scope>organization</scope>
+    <showDetails>true</showDetails>
+</Report>
+"""
+DASHBOARD_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<Dashboard xmlns="http://soap.sforce.com/2006/04/metadata">
+    <backgroundEndColor>#FFFFFF</backgroundEndColor>
+{description}    <title>{name}</title>
+</Dashboard>
+"""
+NO_DESC, EMPTY_DESC = object(), object()   # a file without <description>; one with <description></description>
+CORES = [   # {t}: a fresh token; each starts and ends with a character the cleaning keeps
+    "Girls reached by partner & month, > 2025 intake ({t})",
+    "Mentors' \"monthly\" totals <by region> ({t})",
+    "Club meetings - by region • per month * all ({t})",
+    "Côte d'Ivoire & Ghana clubs: 100% of sessions ({t})",
+    "({t}) Sessions observed by partner -",
+    "{t} new mentors recruited, by partner and month",
+]
+PREFIXES = ["●\t", "", "• ", "* ", "- ", "  ●  ", "●\t• ", "\t-\t", "*-•●  "]
+SUFFIXES = ["", "  ", "\t", " \n ", ""]
+BULLET_ONLY = ["●\t", "• ", " - ", "*"]
+COUNT_WORDS = ("planned", "already described", "decommissioned", "not found", "protected")
+SCENARIOS = {   # key: (folder key it is in now, None: its own; its description now; what the retrieve holds)
+    "A": ({"meet": (None, "blank", "text"), "girls": (None, "none", "text"), "public": (None, "blank", "text"),
+           "archived": (None, "blank", "text"), "stories": (None, "text", "text"),
+           "mentors": ("r_decom", "blank", "text"), "att": (None, "blank", "text"),
+           "observed": (None, "blank", "nodesc"), "mixed": (None, "none", "bullets")}, 1),
+    "B": ({"meet": ("r_cat", "none", "text"), "mentors": (None, "blank", "text"),
+           "stories": ("r_shared", "blank", "text"), "girls": (None, "text", "text"), "public": (None, "text", "text"),
+           "observed": ("r_decom", "blank", "text"), "archived": ("r_decom", "none", "text"),
+           "mixed": ("r_decom", "blank", "text"), "long": (None, "blank", "empty")}, 2),
+}
+
+
+def xml_escape(text):
+    return sax_escape(text, {'"': "&quot;", "'": "&apos;"})
+
+
+def core_text(n):
+    return CORES[n % len(CORES)].format(t=fresh_id(""))
+
+
+def text_of_length(n):
+    """A fictional description of exactly n characters, with & and < (longer once XML-escaped)."""
+    base = f"Girls & mentors <by partner> ({fresh_id('')}) "
+    return (base * (n // len(base) + 2))[:n - 1] + "."
+
+
+class RestoreDescriptions(Harness):
+    """#142 step 2: `restore-descriptions` puts a saved description back on each kept report whose
+    description is blank now, one PATCH per report (name: its label now, folderId: its folder now,
+    description: the saved text), ledgered as "describe" and read back; never prints a text."""
+
+    def fresh(self, **kw):
+        return self.renamed(super().fresh(**kw))
+
+    def renamed(self, org):
+        """Each report gets a fresh DeveloperName: a tool that hard-codes the fixture's cannot pass."""
+        for r in org.reports:
+            r["DeveloperName"] = f"{dev_name(r['Name'])}_{fresh_id('')[:5]}"
+        return org
+
+    def dn(self, rid):
+        return self.org.report(rid)["DeveloperName"]
+
+    def descs(self):
+        return {r["Id"]: r["Description"] for r in self.org.reports}
+
+    def path_of(self, rid):
+        return f"{API_ROOT}analytics/reports/{rid}"
+
+    def patched_ids(self, calls=None):
+        return [c[1].rsplit("/", 1)[1] for c in (calls if calls is not None else self.org.patches())]
+
+    def retrieve(self, files):
+        """An sfdx retrieve dir; files: (folder under force-app/main/default, file stem, description:
+        raw text, NO_DESC or EMPTY_DESC[, extension]). The text is XML-escaped in the file."""
+        root = tempfile.mkdtemp(dir=self.tmp.name, prefix="retrieve_")
+        for entry in files:
+            sub, stem, desc = entry[:3]
+            ext = entry[3] if len(entry) > 3 else ".report-meta.xml"
+            folder = os.path.join(root, "force-app", "main", "default", sub)
+            os.makedirs(folder, exist_ok=True)
+            if desc is NO_DESC:
+                line = ""
+            elif desc is EMPTY_DESC:
+                line = "    <description></description>\n"
+            else:
+                line = f"    <description>{xml_escape(desc)}</description>\n"
+            template = DASHBOARD_XML if ext == ".dashboard-meta.xml" else REPORT_XML
+            with open(os.path.join(folder, stem + ext), "w", encoding="utf-8") as fh:
+                fh.write(template.format(description=line, name=xml_escape(stem.replace("_", " "))))
+        return root
+
+    def stage(self, name):
+        """The scenario `name` in self.org and two retrieve dirs; a namespace with from_args, planned
+        {report id: the cleaned text}, counts {word: n}, ghosts (saved names no report has), texts
+        (every description in play, for the no-print checks)."""
+        scenario, ghosts = SCENARIOS[name]
+        o = self.org
+        files1, files2, planned, texts = [], [], {}, []
+        counts = dict.fromkeys(COUNT_WORDS, 0)
+        for n, (key, (folder, now, saved)) in enumerate(scenario.items()):
+            rid = o.rid[key]
+            r = o.report(rid)
+            sub = "reports/" + next(f["DeveloperName"] for f in o.folders if f["Id"] == r["OwnerId"])
+            if folder:
+                r["OwnerId"] = o.fid[folder]
+            r["Description"] = {"blank": "", "none": None}.get(now, f"Edited in Salesforce ({fresh_id('')})")
+            if now == "text":
+                texts.append(r["Description"])
+            if saved == "text":
+                core = core_text(n)
+                texts.append(core)
+                desc = PREFIXES[n % len(PREFIXES)] + core + SUFFIXES[n % len(SUFFIXES)]
+            else:
+                desc = {"nodesc": NO_DESC, "empty": EMPTY_DESC}.get(saved, BULLET_ONLY[n % len(BULLET_ONLY)])
+            (files1 if n % 2 == 0 else files2).append((sub, r["DeveloperName"], desc))
+            if saved == "text":
+                if o.folder_name(r["OwnerId"]) == "Decommissioned":
+                    counts["decommissioned"] += 1
+                elif o.folder_name(r["OwnerId"]) == "Attendance":
+                    counts["protected"] += 1
+                elif now == "text":
+                    counts["already described"] += 1
+                else:
+                    planned[rid] = core
+        first, second = list(planned)[:2]
+        # the same text again, another bullet before it, in the other dir: no conflict
+        files2.append(("reports/unfiled$public", self.dn(first), "●\t" + planned[first] + " "))
+        # a dashboard whose file stem is a report's developer name: not a report file, never read
+        other = core_text(5)
+        texts.append(other)
+        files2.append(("dashboards/DHIS2_Dashboards", self.dn(second), other, ".dashboard-meta.xml"))
+        ghost_names = []
+        for g in range(ghosts):
+            ghost = f"Retired_export_{fresh_id('')[:6]}"
+            text = core_text(g + 2)
+            texts.append(text)
+            files1.append(("reports/Old_Exports", ghost, "• " + text))
+            ghost_names.append(ghost)
+        counts["not found"], counts["planned"] = ghosts, len(planned)
+        d1, d2 = self.retrieve(files1), self.retrieve(files2)
+        return types.SimpleNamespace(from_args=["--from", d1, "--from", d2], planned=planned, counts=counts,
+                                     ghosts=ghost_names, texts=texts)
+
+    def restore(self, *argv):
+        return self.ok("restore-descriptions", "--vpn-off", *argv)
+
+    def expect(self, n):
+        """--expect N: the planned count the run must find (#142 review: the plan is the set Ryan agreed)."""
+        return ["--expect", str(n)]
+
+    def count_of(self, said, word, absent=None):
+        """The count printed for `word` ("word: N" or "N word"); every mention agrees."""
+        w = re.escape(word).replace(r"\ ", r"\s+")
+        pattern = re.compile(rf"(?<![A-Za-z0-9])(\d+)\s+{w}\b|\b{w}\s*[:=]?\s*(\d+)(?![A-Za-z0-9])", re.IGNORECASE)
+        values = {int(a or b) for a, b in pattern.findall(said)}
+        if not values and absent is not None:
+            return absent
+        self.assertEqual(len(values), 1, f'one count of "{word}" expected, found {sorted(values)} in:\n{said}')
+        return values.pop()
+
+    def assert_counts(self, said, counts):
+        for word, n in counts.items():
+            got = self.count_of(said, word, absent=0 if word == "protected" and n == 0 else None)
+            self.assertEqual(got, n, f'the count of "{word}":\n{said}')
+
+    def assert_no_text_printed(self, said, texts):
+        """No description (as saved, as escaped in the file), no 30-character start of one, no
+        18-character token of one in the output (or a ledger)."""
+        for text in texts:
+            if not text:
+                continue
+            for form in (text, xml_escape(text)):
+                self.assertNotIn(form, said, "a description was printed")
+                self.assertNotIn(form[:30], said, "the start of a description was printed")
+            for token in re.findall(r"[A-Za-z0-9]{18}", text):
+                self.assertNotIn(token, said, "part of a description was printed")
+
+    # -- the broad behaviour
+    def test_dry_run_plans_the_blank_kept_reports_and_writes_nothing(self):
+        for name in SCENARIOS:
+            o = self.fresh()
+            s = self.stage(name)
+            before, descs = o.state(), self.descs()
+            said = self.restore(*self.expect(len(s.planned)), *s.from_args)
+            self.assert_nothing_written(before)
+            self.assertEqual(self.descs(), descs, f"{name}: a dry run changes no description")
+            for rid in s.planned:
+                lines = self.lines_with(said, rid)
+                self.assertEqual(len(lines), 1, f"{name}: one line per planned report ({rid}):\n{said}")
+                self.assertIn(o.report(rid)["Name"], lines[0], f"{name}: the line names its label")
+                self.assertIn(o.folder_name(o.report(rid)["OwnerId"]), lines[0], f"{name}: and its folder now")
+            self.assert_counts(said, s.counts)
+            for ghost in s.ghosts:
+                self.assertIn(ghost, said, f"{name}: a saved name no report has is reported")
+            self.assert_no_text_printed(said, s.texts)
+
+    def test_apply_restores_each_planned_description_and_reads_it_back(self):
+        for name in SCENARIOS:
+            o = self.fresh()
+            s = self.stage(name)
+            before, descs = o.state(), self.descs()
+            said = self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
+            self.assertEqual(o.posts(), [], "a restore is a PATCH, never a clone")
+            patches = o.patches()
+            self.assertEqual(sorted(self.patched_ids()), sorted(s.planned),
+                             f"{name}: one PATCH per planned report, none other:\n{said}")
+            for rid, text in s.planned.items():
+                sent = [p for p in patches if p[1] == self.path_of(rid)][0]
+                folder_id, label = before[0][rid]
+                self.assertEqual(sent[2], {"reportMetadata": {"name": label, "folderId": folder_id, "description": text}},
+                                 f"{name}: {rid}'s PATCH carries its label and folder now and the saved text")
+                self.assertEqual(o.report(rid)["Description"], text, f"{name}: {rid}'s description is back")
+            self.assertEqual(o.state(), before, f"{name}: no folder or label changed")
+            for rid, was in descs.items():
+                if rid not in s.planned:
+                    self.assertEqual(o.report(rid)["Description"], was, f"{name}: {rid} is not touched")
+            ledger = self.ledger()
+            self.assertEqual([(x["action"], x["kind"], x["id"], x["status"], x["http"]) for x in ledger],
+                             [("describe", "report", rid, "ok", "200") for rid in self.patched_ids()],
+                             f"{name}: one describe row per write, in order")
+            with open(self.ledger_path, encoding="utf-8") as fh:
+                self.assert_no_text_printed(fh.read(), s.texts)
+            self.assert_no_text_printed(said, s.texts)
+
+            # a second run finds nothing left to restore (planned 0: --expect 0 is its count)
+            sent = len(o.calls)
+            said = self.restore(*self.expect(0), *s.from_args)
+            again = dict(s.counts, planned=0)
+            again["already described"] += len(s.planned)
+            self.assert_counts(said, again)
+            self.restore("--apply", *self.expect(0), *s.from_args)
+            self.assertEqual(self.writes_since(sent), [], f"{name}: every description is back already")
+            self.assertEqual(len(self.ledger()), len(s.planned))
+
+    # -- the specific cases
+    def test_the_saved_text_is_unescaped_and_stripped_of_leading_bullets(self):
+        o = self.org
+        keys = ["meet", "girls", "mentors", "observed", "stories", "mixed", "public", "archived"]
+        want, files = {}, []
+        for n, key in enumerate(keys):
+            rid = o.rid[key]
+            core = core_text(n)
+            prefix, suffix = PREFIXES[(n + 1) % len(PREFIXES)], SUFFIXES[(n + 2) % len(SUFFIXES)]
+            want[rid] = core
+            files.append((f"reports/Folder_{n % 3}", self.dn(rid), prefix + core + suffix))
+        said = self.restore("--apply", *self.expect(len(want)), "--from", self.retrieve(files))
+        for rid, core in want.items():
+            self.assertEqual(o.report(rid)["Description"], core,
+                             f"{rid}: unescaped, the leading bullets and whitespace and the trailing whitespace gone; "
+                             "the bullets inside and at the end kept")
+        self.assert_no_text_printed(said, list(want.values()))
+
+    def test_two_texts_for_one_developer_name_are_refused(self):
+        for layout in ("two dirs", "two folders of one dir"):
+            o = self.fresh()
+            meet, girls = o.rid["meet"], o.rid["girls"]
+            a, b, c = core_text(0), core_text(1), core_text(2)
+            files = [("reports/DHIS2_Reports", self.dn(meet), "●\t" + a), ("reports/DHIS2_Reports", self.dn(girls), c)]
+            other = ("reports/Old_Exports", self.dn(meet), "● " + b)
+            if layout == "two dirs":
+                args = ["--from", self.retrieve(files), "--from", self.retrieve([other])]
+            else:
+                args = ["--from", self.retrieve(files + [other])]
+            before = o.state()
+            for extra in ([], ["--apply"]):
+                said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), *args, *extra)
+                self.assert_nothing_written(before)
+                self.assertIn(self.dn(meet), said, f"{layout}: the refusal names the developer name")
+                self.assert_no_text_printed(said, [a, b, c])
+        # the control: the same text twice (one with a bullet before it) is no conflict
+        o = self.fresh()
+        meet = o.rid["meet"]
+        a = core_text(3)
+        self.restore("--apply", *self.expect(1),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + a + "  ")]),
+                     "--from", self.retrieve([("reports/Old_Exports", self.dn(meet), a)]))
+        self.assertEqual(self.patched_ids(), [meet])
+        self.assertEqual(o.report(meet)["Description"], a)
+
+    def test_a_name_no_report_has_is_reported_and_skipped(self):
+        for count in (1, 3):
+            o = self.fresh()
+            girls = o.rid["girls"]
+            text = core_text(0)
+            ghosts = [f"Old_export_{fresh_id('')[:6]}" for _ in range(count)]
+            texts = [core_text(n) for n in range(1, count + 1)]
+            d = self.retrieve([("reports/DHIS2_Reports", self.dn(girls), text)]
+                              + [("reports/Old_Exports", g, "●\t" + t) for g, t in zip(ghosts, texts)])
+            said = self.restore(*self.expect(1), "--from", d)
+            self.assertEqual(self.count_of(said, "not found"), count, said)
+            self.assertEqual(self.count_of(said, "planned"), 1, said)
+            said = self.restore("--apply", *self.expect(1), "--from", d)
+            for g in ghosts:
+                self.assertIn(g, said, "the saved name no report has is reported")
+            self.assertEqual(self.patched_ids(), [girls])
+            self.assertEqual(o.report(girls)["Description"], text)
+            self.assert_no_text_printed(said, [text] + texts)
+
+    def test_a_name_two_reports_have_is_refused(self):
+        o = self.org
+        meet = o.report(o.rid["meet"])
+        twin = dict(meet, Id=fresh_id("00O"), Name="Club meeting frequency", OwnerId=o.fid["r_cat"], Description="")
+        o.reports.append(twin)
+        texts = [core_text(0), core_text(1)]
+        d = self.retrieve([("reports/DHIS2_Reports", meet["DeveloperName"], texts[0]),
+                           ("reports/DHIS2_Reports", self.dn(o.rid["girls"]), texts[1])])
+        before = o.state()
+        for extra in ([], ["--apply"]):
+            said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), "--from", d, *extra)
+            self.assert_nothing_written(before)
+            self.assertIn(meet["DeveloperName"], said, "the refusal names the developer name")
+            self.assert_no_text_printed(said, texts)
+        # the control: one report of that name again
+        o.reports.remove(twin)
+        self.restore("--apply", *self.expect(2), "--from", d)
+        self.assertEqual(sorted(self.patched_ids()), sorted([meet["Id"], o.rid["girls"]]))
+
+    def test_a_description_over_255_characters_is_refused_before_any_write(self):
+        for length in (256, 300):
+            o = self.fresh()
+            meet, girls = o.rid["meet"], o.rid["girls"]
+            texts = [core_text(0), text_of_length(length)]
+            d = self.retrieve([("reports/DHIS2_Reports", self.dn(girls), texts[0]),
+                               ("reports/DHIS2_Reports", self.dn(meet), "●\t" + texts[1])])
+            before = o.state()
+            for extra in ([], ["--apply"]):
+                said = self.refused("restore-descriptions", "--vpn-off", *self.expect(2), "--from", d, *extra)
+                self.assert_nothing_written(before)
+                self.assertIn("255", said, f"{length}: the refusal says the limit")
+                self.assertTrue(self.dn(meet) in said or meet in said, f"{length}: it names the report:\n{said}")
+                self.assert_no_text_printed(said, texts)
+        # the control: 255 once unescaped and stripped (longer in the file: & is &amp;)
+        o = self.fresh()
+        meet = o.rid["meet"]
+        text = text_of_length(255)
+        self.restore("--apply", *self.expect(1),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + text + "  ")]))
+        self.assertEqual(o.report(meet)["Description"], text)
+
+    def test_a_from_dir_that_is_missing_or_holds_no_report_file_is_refused(self):
+        o = self.org
+        meet = o.rid["meet"]
+        text = core_text(0)
+        good = self.retrieve([("reports/DHIS2_Reports", self.dn(meet), text)])
+        missing = os.path.join(self.tmp.name, f"no_retrieve_{fresh_id('')[:6]}")
+        empty = tempfile.mkdtemp(dir=self.tmp.name, prefix="empty_")
+        os.makedirs(os.path.join(empty, "force-app", "main", "default", "reports", "DHIS2_Reports"))
+        dashboards = self.retrieve([("dashboards/DHIS2_Dashboards", self.dn(meet), core_text(1), ".dashboard-meta.xml")])
+        before = o.state()
+        for bad in (missing, empty, dashboards):
+            for args in (["--from", bad], ["--from", good, "--from", bad]):
+                for extra in ([], ["--apply"]):
+                    said = self.refused("restore-descriptions", "--vpn-off", *self.expect(1), *args, *extra)
+                    self.assert_nothing_written(before)
+                    self.assertIn(os.path.basename(bad), said, f"the refusal names the dir:\n{said}")
+        self.restore("--apply", *self.expect(1), "--from", good)
+        self.assertEqual(self.patched_ids(), [meet])
+        self.assertEqual(o.report(meet)["Description"], text)
+
+    def test_limit_writes_the_first_n_and_a_later_run_the_rest(self):
+        for n in (1, 2, 3):
+            o = self.fresh()
+            s = self.stage("A")
+            self.restore("--apply", "--limit", str(n), *self.expect(len(s.planned)), *s.from_args)
+            first = self.patched_ids()
+            self.assertEqual(len(first), n, f"--limit {n}")
+            self.assertEqual(len(set(first)), n)
+            self.assertLessEqual(set(first), set(s.planned))
+            self.assertEqual(len(self.ledger()), n)
+            for rid, text in s.planned.items():
+                self.assertEqual(o.report(rid)["Description"] or "", text if rid in first else "", f"--limit {n}: {rid}")
+            sent = len(o.calls)
+            self.restore("--apply", *self.expect(len(s.planned) - n), *s.from_args)
+            rest = self.patched_ids(self.writes_since(sent))
+            self.assertEqual(sorted(rest), sorted(set(s.planned) - set(first)), f"--limit {n}: the rest, later")
+            for rid, text in s.planned.items():
+                self.assertEqual(o.report(rid)["Description"], text)
+
+    def test_a_write_that_does_not_read_back_stops_the_run(self):
+        """A PATCH answered 200 whose description Salesforce dropped or changed (only a SOQL read-back
+        sees it), one that stored nothing ("echo"), or a refused PATCH: its row is failed, nothing is
+        sent after it, the writes before it stand (ok), the refusal names the report."""
+        stopped_early = False
+        for mode in ("drop", "cut", "other", "empty", "echo", "refused"):
+            for k in range(4):
+                o = self.fresh()
+                s = self.stage("A")
+                bad = sorted(s.planned)[k]
+                if mode == "echo":
+                    o.drift[bad] = "echo"
+                elif mode == "refused":
+                    o.refuse_patch.add(bad)
+                else:
+                    o.desc_drift[bad] = mode
+                said = self.refused("restore-descriptions", "--vpn-off", "--apply", *self.expect(len(s.planned)),
+                                    *s.from_args)
+                where = f"{mode}, planned report {k}"
+                ids = self.patched_ids()
+                self.assertTrue(ids and ids[-1] == bad, f"{where}: nothing sent after {bad}:\n{ids}\n{said}")
+                self.assertEqual(len(set(ids)), len(ids), where)
+                stopped_early = stopped_early or len(ids) < len(s.planned)
+                self.assertEqual([(x["action"], x["id"], x["status"]) for x in self.ledger()],
+                                 [("describe", i, "ok") for i in ids[:-1]] + [("describe", bad, "failed")], where)
+                for i in ids[:-1]:
+                    self.assertEqual(o.report(i)["Description"], s.planned[i], f"{where}: {i} stays restored")
+                for i in set(s.planned) - set(ids):
+                    self.assertIn(o.report(i)["Description"], (None, ""), f"{where}: {i} is not touched")
+                self.assertIn(bad, said, f"{where}: the refusal names the report")
+                if mode == "refused":
+                    self.assertIn("400", said, f"{where}: the refusal says the HTTP code")
+                self.assert_no_text_printed(said, s.texts + [o.report(bad)["Description"]])
+        self.assertTrue(stopped_early, "some run stopped before the last planned report")
+
+    def test_each_describe_row_is_on_disk_before_its_patch(self):
+        o = self.org = self.renamed(WatchedOrg(self.ledger_path))
+        s = self.stage("B")
+        self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
+        self.assertEqual([m for m, _, _ in o.on_disk], ["PATCH"] * len(s.planned))
+        ids = [p.rsplit("/", 1)[1] for _, p, _ in o.on_disk]
+        for k, (_, _, seen) in enumerate(o.on_disk):
+            mine = [x for x in seen if x["id"] == ids[k] and x["status"] == "sending"]
+            self.assertEqual(len(mine), 1, f"PATCH {k + 1}: its 'sending' row is on disk first:\n{seen}")
+            self.assertEqual((mine[0]["action"], mine[0]["kind"]), ("describe", "report"))
+            for earlier in ids[:k]:
+                done = [x for x in seen if x["id"] == earlier and x["status"] == "ok"]
+                self.assertEqual(len(done), 1, f"PATCH {k + 1}: {earlier}'s finished row is on disk first")
+
+    def test_undo_undoes_only_the_moves_of_a_ledger_with_describe_rows(self):
+        o = self.org
+        original = o.state()[0]
+        meet, girls = o.rid["meet"], o.rid["girls"]
+        self.apply_moves([[("report", meet, "GLOW Club Reports", "Club meeting frequency")]])
+        texts = [core_text(0), core_text(1)]
+        self.restore("--apply", *self.expect(2),
+                     "--from", self.retrieve([("reports/DHIS2_Reports", self.dn(meet), "●\t" + texts[0]),
+                                                         ("reports/DHIS2_Reports", self.dn(girls), texts[1])]))
+        ledger = self.ledger()
+        self.assertEqual(sorted((x["action"], x["id"]) for x in ledger),
+                         sorted([("move", meet), ("describe", meet), ("describe", girls)]))
+        self.assertEqual(o.report(meet)["Description"], texts[0], "restored in the folder it was moved to")
+
+        said = self.ok("undo", "--ledger", self.ledger_path, "--vpn-off")
+        self.assertEqual(len(self.lines_with(said, meet)), 1, said)
+        self.assertEqual(self.lines_with(said, girls), [], f"a describe row is no move to undo:\n{said}")
+        sent = len(o.calls)
+        said = self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual([w[1] for w in self.writes_since(sent)], [self.path_of(meet)], "only the move is undone")
+        self.assertEqual(o.state()[0], original, "back where and as it was")
+        self.assertEqual((o.report(meet)["Description"], o.report(girls)["Description"]), tuple(texts),
+                         "the restored descriptions stay through the undo")
+        self.assertEqual([(x["action"], x["id"], x["status"]) for x in self.ledger()[len(ledger):]],
+                         [("undo", meet, "ok")])
+        sent = len(o.calls)
+        self.ok("undo", "--ledger", self.ledger_path, "--vpn-off", "--apply")
+        self.assertEqual(self.writes_since(sent), [], "nothing left to undo")
+        self.assert_no_text_printed(said, texts)
+
+    # -- review fix: --expect N, the planned count Ryan agreed (the 12 kept reports the #73 moves blanked)
+    def refusal(self, said):
+        """What a run said on stderr and in its exit message, without its stdout (the plan, the counts)."""
+        return said[len(self.out):]
+
+    def assert_names(self, text, *numbers):
+        for n in numbers:
+            self.assertRegex(text, rf"(?<!\d){n}(?!\d)", f"the refusal names {n}:\n{text}")
+
+    def test_expect_must_be_the_planned_count_or_the_run_is_refused(self):
+        """--expect N counts the whole plan: planned == N runs as before; any other N is refused (the dry
+        run after printing its plan and its counts, --apply before any write), naming both numbers; with
+        --limit too, N is still the whole plan's count, never the limited part."""
+        for name in SCENARIOS:
+            o = self.fresh()
+            s = self.stage(name)
+            planned = len(s.planned)
+            self.assertGreaterEqual(planned, 3, "the scenario plans enough reports to tell the counts apart")
+            others = sorted({0, planned - 1, planned + 1, planned + 5, sum(s.counts.values()),
+                             planned + s.counts["not found"]} - {planned})
+            before, descs = o.state(), self.descs()
+            for n in others:
+                where = f"{name}: {planned} planned, --expect {n}"
+                said, code = self.run_tool("restore-descriptions", "--vpn-off", *self.expect(n), *s.from_args)
+                self.assertNotIn(code, (None, 0), f"{where}: the dry run ends refused:\n{said}")
+                self.assert_nothing_written(before)
+                for rid in s.planned:
+                    self.assertEqual(len(self.lines_with(self.out, rid)), 1, f"{where}: the dry run prints its plan")
+                self.assert_counts(self.out, s.counts)
+                self.assert_names(self.refusal(said), n, planned)
+                self.assert_no_text_printed(said, s.texts)
+                for extra in (["--apply"], ["--apply", "--limit", "1"]):
+                    said = self.refused("restore-descriptions", "--vpn-off", *extra, *self.expect(n), *s.from_args)
+                    self.assert_nothing_written(before)
+                    self.assertEqual(self.descs(), descs, where)
+                    self.assert_names(self.refusal(said), n, planned)
+                    self.assert_no_text_printed(said, s.texts)
+            # --expect is the whole plan's count: --limit k with --expect k (k < planned) is refused
+            for k in range(1, planned):
+                self.refused("restore-descriptions", "--vpn-off", "--apply", "--limit", str(k), *self.expect(k),
+                             *s.from_args)
+                self.assert_nothing_written(before)
+            # the control: --expect the planned count, with --limit, then the rest
+            self.restore("--apply", "--limit", "1", *self.expect(planned), *s.from_args)
+            first = self.patched_ids()
+            self.assertEqual(len(first), 1)
+            self.restore("--apply", *self.expect(planned - 1), *s.from_args)
+            self.assertEqual(sorted(self.patched_ids()), sorted(s.planned))
+            for rid, text in s.planned.items():
+                self.assertEqual(o.report(rid)["Description"], text, f"{name}: {rid}")
+
+    def test_expect_is_required_and_a_number(self):
+        o = self.org
+        d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid["meet"]), core_text(0))])
+        for args in ([], ["--apply"], ["--apply", "--limit", "1"], ["--expect", "twelve"], ["--expect", ""],
+                     ["--apply", "--expect", "1.5"]):
+            said, code = self.run_tool("restore-descriptions", "--vpn-off", *args, "--from", d)
+            self.assertEqual(code, 2, f"{args}: an argparse error:\n{said}")
+            self.assertIn("--expect", said, args)
+            self.assertEqual((o.calls, o.seen), ([], []), f"{args}: Salesforce was asked")
+            self.assertFalse(os.path.exists(self.ledger_path), args)
+
+    # -- the ruling: a planned report whose label is over 40 characters is refused before any write
+    def test_a_planned_report_whose_label_is_over_40_is_refused_before_any_write(self):
+        keys = ["meet", "girls", "mentors", "stories", "observed"]     # all blank, in DHIS2 Reports
+        for label, key in ((L41, "observed"), (LONG, "mentors"), (L60, "girls")):
+            o = self.fresh()
+            rid = o.rid[key]
+            o.report(rid)["Name"] = label
+            texts = [core_text(n) for n in range(len(keys))]
+            d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid[k]), "●\t" + t) for k, t in zip(keys, texts)])
+            before = o.state()
+            for extra in ([], ["--apply"], ["--apply", "--limit", "1"]):
+                where = f"{len(label)} characters, {extra}"
+                said = self.refused("restore-descriptions", "--vpn-off", *extra, *self.expect(len(keys)), "--from", d)
+                self.assert_nothing_written(before)
+                self.assertEqual(o.report(rid)["Description"], "", where)
+                self.assertTrue(rid in said or self.dn(rid) in said, f"{where}: the refusal names the report:\n{said}")
+                self.assert_no_text_printed(said, texts)
+        # the control: a 40-character label is restored with it
+        o = self.fresh()
+        rid = o.rid["observed"]
+        o.report(rid)["Name"] = L40
+        want = {o.rid[k]: core_text(n) for n, k in enumerate(keys)}
+        d = self.retrieve([("reports/DHIS2_Reports", self.dn(r), t) for r, t in want.items()])
+        self.restore("--apply", *self.expect(len(keys)), "--from", d)
+        self.assertEqual(sorted(self.patched_ids()), sorted(want))
+        sent = [p for p in o.patches() if p[1] == self.path_of(rid)]
+        self.assertEqual(sent[0][2]["reportMetadata"]["name"], L40)
+        for r, t in want.items():
+            self.assertEqual(o.report(r)["Description"], t)
+
+    def test_a_long_label_on_a_report_that_is_not_planned_does_not_block_the_run(self):
+        o = self.org
+        planned = {o.rid[k]: core_text(n) for n, k in enumerate(["meet", "girls", "stories"])}
+        skipped = {   # long-labelled reports with a saved text, none planned
+            "mentors": (L41, "r_dhis2", f"Edited in Salesforce ({fresh_id('')})"),     # already described
+            "observed": (LONG, "r_decom", ""),                                         # in Decommissioned
+            "att": (L60, "r_att", ""),                                                 # in Attendance
+        }
+        files = [("reports/DHIS2_Reports", self.dn(r), t) for r, t in planned.items()]
+        texts = list(planned.values())
+        for n, (key, (label, folder, now)) in enumerate(skipped.items()):
+            r = o.report(o.rid[key])
+            r.update(Name=label, OwnerId=o.fid[folder], Description=now)
+            text = core_text(n + 3)
+            texts += [text] + ([now] if now else [])
+            files.append(("reports/Old_Exports", r["DeveloperName"], text))
+        o.report(o.rid["long"])["Description"] = ""        # LONG (43), blank, not in the retrieve
+        d = self.retrieve(files)
+        before, descs = o.state(), self.descs()
+        said = self.restore(*self.expect(len(planned)), "--from", d)
+        self.assert_counts(said, {"planned": 3, "already described": 1, "decommissioned": 1, "protected": 1,
+                                  "not found": 0})
+        said = self.restore("--apply", *self.expect(len(planned)), "--from", d)
+        self.assertEqual(sorted(self.patched_ids()), sorted(planned))
+        for rid, was in descs.items():
+            self.assertEqual(o.report(rid)["Description"], planned.get(rid, was), rid)
+        self.assertEqual(o.state(), before, "no folder or label changed")
+        self.assert_no_text_printed(said, texts)
+
+    def test_restore_refuses_without_vpn_off(self):
+        o = self.org
+        d = self.retrieve([("reports/DHIS2_Reports", self.dn(o.rid["meet"]), core_text(0))])
+        for extra in ([], ["--apply"]):
+            said = self.refused("restore-descriptions", *self.expect(1), "--from", d, *extra)
+            self.assertIn("--vpn-off", said, extra)
+            self.assertEqual((o.calls, o.seen), ([], []), f"Salesforce was asked: {extra}")
+            self.assertFalse(os.path.exists(self.ledger_path), extra)
+
+    def test_restore_reads_reports_and_folders_and_writes_report_patches_only(self):
+        o = self.org
+        s = self.stage("A")
+        self.restore(*self.expect(len(s.planned)), *s.from_args)
+        self.restore("--apply", *self.expect(len(s.planned)), *s.from_args)
+        self.assertTrue(o.seen and o.patches())
+        self.assertLessEqual({c[0] for c in o.calls}, {"GET", "PATCH"})
+        for soql in o.seen:
+            self.assertLessEqual(soql_objects(soql), ALLOWED_OBJECTS, soql)
+            self.assertNotIn("fields(", soql.lower(), soql)
+        for method, path, _ in o.calls:
+            if method == "PATCH":
+                self.assertIn(path, [self.path_of(rid) for rid in s.planned])
+            else:
+                self.assertRegex(path, r"^/services/data/v67\.0/analytics/reports/\w+/describe$")
+
+    def test_restore_help_answers(self):
+        done = subprocess.run([sys.executable, TOOL, "restore-descriptions", "--help"], capture_output=True, text=True,
+                              cwd=REPO, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for word in ("--from", "--apply", "--limit", "--vpn-off", "--expect"):
+            self.assertIn(word, done.stdout)
+
+
 class Docs(unittest.TestCase):
     ARCH = os.path.join(REPO, "docs", "ARCHITECTURE.md")
     RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
@@ -1452,6 +2515,12 @@ class Docs(unittest.TestCase):
         writer = self.row(md_part(self.SKILL, "## Writers"), ".claude/skills/salesforce/SKILL.md Writers")
         for word in ("--apply", "--vpn-off", "undo"):
             self.assertIn(word, writer, f"the skill's Writers row names {word}")
+
+    def test_the_runbook_and_the_docstring_give_the_restore_descriptions_command(self):
+        part = md_part(self.RUNBOOK, self.SUB)
+        self.assertRegex(part, r"sf_report_folders\.py\s+restore-descriptions\b",
+                         f"RUNBOOK {self.SUB} gives the restore-descriptions command")
+        self.assertIn("restore-descriptions", srf.__doc__, "the tool's docstring names restore-descriptions")
 
     def test_help_answers(self):
         for argv in (["--help"], ["move", "--help"], ["undo", "--help"]):

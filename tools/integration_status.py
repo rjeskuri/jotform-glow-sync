@@ -9,7 +9,12 @@ Attendance_Batch__c, the eight fields from their questions and NO upload (the Gr
 not gone to Salesforce since 2026-10-01, the CEO's decision; it is copied to Google Drive by
 Jotform's own integration instead) - with Account_Name__c read from question 5 (the hidden
 Club Name field every form shares), never from the Club picker, and all live forms on one
-connection. For every live form it also lists the other integration blocks the form carries
+connection. A ninth field, Session_Notes__c (ticket #106), reads the form's own question named
+sessionNotes (its qid differs per form): right when present, and required (NOTES_MAPPING_WANTED,
+True since 2026-10-26) on every live form but one whose `status` property is exactly DISABLED
+(the U.S form today): unmapped, that one is right and its ok line says the notes are not wanted;
+a notes mapping it does carry, and everything else about it, is checked as on any form. For
+every live form it also lists the other integration blocks the form carries
 (`other integrations:`; none today).
 
     python3 tools/integration_status.py              # the five live forms and the old ones
@@ -27,6 +32,7 @@ sys.path.insert(0, REPO)
 from glow import forms                  # noqa: E402
 from glow.cli import api_key, run      # noqa: E402
 from glow.jotform import Client         # noqa: E402
+from glow.layout import NOTES_FIX, NOTES_NAME, notes_fields   # noqa: E402
 from glow.sync import (                 # noqa: E402
     CLUB_NAME, CONTACT_IDS, CREATOR, DATE, ENABLE_FUZZY, MODULE_ID, PHOTO, PICKER_NAME, WEEK_ID, YEAR_ID)
 
@@ -42,6 +48,21 @@ UPLOADS = []
 QUESTIONS = {CLUB_NAME: "clubName", DATE: "date", CONTACT_IDS: "contact_ids", MODULE_ID: "module_id",
              WEEK_ID: "week_id", YEAR_ID: "year_id", CREATOR: "creator", ENABLE_FUZZY: "enableFuzzy",
              PHOTO: "photo"}
+# the session notes (ticket #106): Session_Notes__c from the question named NOTES_NAME, found by
+# its name like the Club picker - its qid differs per form. Ryan maps it in each live form's
+# builder (the API cannot). A present mapping must always read the form's own sessionNotes. The
+# rollout ended 2026-10-26 (docs/plans/2026-10-26-session-notes-salesforce.md): Ryan mapped the
+# template (q489), Africa (q476), Asia (q457) and Latin America (q454) in the builder; the U.S
+# form is DISABLED and was left unmapped on his word ("Skip U.S: it is disabled"). So the switch
+# is True: a live form without the mapping is NOT RIGHT, exit 1 - unless its `status` is exactly
+# DISABLED (re-enabling U.S: map q446 first, RUNBOOK "Session notes in Salesforce"). False is the
+# rollback: a present mapping is still checked, a form without one is right.
+NOTES_FIELD = "Session_Notes__c"
+NOTES_MAPPING_WANTED = True
+# the `status` property of a switched-off form (tools/disable_form.py). Only this exact value
+# excuses a live form from the notes mapping: any other (ENABLED, none, DELETED, `disabled`) is an
+# enabled form's - an unknown state never excuses one
+DISABLED = "DISABLED"
 # TODO (docs/plans/2026-10-06-photos-to-drive.md, part 2, NOT built yet): once Ryan has set up the
 # Google Drive integration on the template in the builder, the `other integrations:` line below
 # prints the Drive block's key - that is how it is learned (whether the block is visible in the
@@ -72,10 +93,22 @@ def other_integrations(props):
     return sorted(k for k in integrations_of(props) if k != KEY)
 
 
-def problems(block, questions):
-    """What is wrong with a form's Salesforce integration ([] = right)."""
+def actions_of(block):
+    """The block's actions (its actionMap: a JSON string, or the list itself)."""
     raw = block.get("actionMap")
-    acts = json.loads(raw) if isinstance(raw, str) else raw
+    return json.loads(raw) if isinstance(raw, str) else raw
+
+
+def from_questions(act):
+    """{Salesforce field: qid} of the action's fields read from a question."""
+    return {f.get("targetId"): str((f.get("source") or {}).get("value"))
+            for f in act.get("fieldMapping") or [] if (f.get("source") or {}).get("type") == "question"}
+
+
+def problems(block, questions, disabled=False):
+    """What is wrong with a form's Salesforce integration ([] = right). `disabled`: the form's
+    status is DISABLED, so it needs no Session_Notes__c mapping (one it carries is checked)."""
+    acts = actions_of(block)
     if not block.get("integrationAccountID"):
         return ["no connected Salesforce account"]
     if not isinstance(acts, list) or len(acts) != 1:
@@ -85,8 +118,7 @@ def problems(block, questions):
                                                                      "Attendance_Batch__c"):
         out.append(f"the action is {act.get('action')}/{act.get('upsert')} on {act.get('object')}, "
                    "not 'create a new record' of Attendance_Batch__c")
-    have = {f.get("targetId"): str((f.get("source") or {}).get("value"))
-            for f in act.get("fieldMapping") or [] if (f.get("source") or {}).get("type") == "question"}
+    have = from_questions(act)
     names = {qid: (q.get("name"), q.get("text")) for qid, q in questions.items()}
     for field, qid in MAPPING.items():
         got = have.get(field)
@@ -96,7 +128,22 @@ def problems(block, questions):
         if got is not None and names.get(got, (None,))[0] == PICKER_NAME:
             what += " (the Club picker)"
         out.append(f"{field} {what}; it must read q{qid} ({QUESTIONS[qid]})")
-    out += [f"{f} is mapped too (leave it unmapped)" for f in sorted(set(have) - set(MAPPING))]
+    # Session_Notes__c: checked once it is mapped or wanted (a DISABLED form's only when mapped),
+    # against the form's one question named sessionNotes; two of them is then a problem, not a
+    # guess (form_status flags them anyway)
+    got, notes = have.get(NOTES_FIELD), [str(q["qid"]) for q in notes_fields(questions)]
+    if (got is not None or (NOTES_MAPPING_WANTED and not disabled)) and notes != [got]:
+        what = "is not mapped from a question" if got is None else f"reads q{got}"
+        if len(notes) == 1:
+            must = f"q{notes[0]} ({NOTES_NAME})"
+        elif notes:
+            must = (f"the one question named {NOTES_NAME}, and the form has {len(notes)} "
+                    f"({', '.join('q' + n for n in notes)}) - delete the extra one in the builder")
+        else:
+            must = f"the question named {NOTES_NAME}, and the form has none - run {NOTES_FIX}"
+        out.append(f"{NOTES_FIELD} {what}; it must read {must}")
+    out += [f"{f} is mapped too (leave it unmapped)"
+            for f in sorted(set(have) - set(MAPPING) - {NOTES_FIELD})]
     if len(act.get("fieldMapping") or []) != len(have):
         out.append("a field is mapped from something that is not a question")
     uploads = list(act.get("uploadFields") or [])
@@ -134,16 +181,25 @@ def main(argv=None, client=None):
             print(f"{label}: NO Salesforce integration - set it up in the form builder (RUNBOOK)")
             bad += 1
         else:
-            found = problems(block, client.get(f"/form/{form_id}/questions"))
+            disabled = props.get("status") == DISABLED     # the exact value, by ==
+            found = problems(block, client.get(f"/form/{form_id}/questions"), disabled)
             connections.add(str(block.get("integrationAccountID")))
             if found:
                 bad += 1
                 print(f"{label}: connection {block.get('integrationAccountID')} - NOT RIGHT:")
                 for line in found:
                     print(f"  - {line}")
-            else:
-                print(f"{label}: connection {block.get('integrationAccountID')} - ok (one action, 8 fields, "
-                      f"Account_Name__c from q{CLUB_NAME}, {uploads})")
+            else:   # right, so a notes mapping reads the form's own sessionNotes
+                notes = from_questions(actions_of(block)[0]).get(NOTES_FIELD)
+                if notes:
+                    said = f"{NOTES_FIELD} from q{notes}, "
+                elif NOTES_MAPPING_WANTED and disabled:
+                    said = f"{NOTES_FIELD} not wanted (form {DISABLED}), "
+                else:
+                    said = ""
+                print(f"{label}: connection {block.get('integrationAccountID')} - ok (one action, "
+                      f"{len(MAPPING) + bool(notes)} fields, Account_Name__c from q{CLUB_NAME}, "
+                      f"{said}{uploads})")
         print(f"  other integrations: {', '.join(other_integrations(props)) or 'none'}")
     if len(connections) > 1:
         bad += 1

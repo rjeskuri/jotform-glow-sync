@@ -13,9 +13,28 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-06 | OMID Foundation as an Asia partner - Partners tab, the Jotform Attendance dashboard's Partner filter, the partner map | done 2026-11-06 |  | [2026-11-06-sf-omid-partner.md](2026-11-06-sf-omid-partner.md) |
+| 2026-11-05 | The six U.S partners off every dashboard and report; the not-submitted lists without the monthly partners | done 2026-11-06 |  | [2026-11-05-sf-us-partners.md](2026-11-05-sf-us-partners.md) |
+| 2026-11-02 | Mentors (D4) - 2026 only, a Month filter, the former PO off the filter | done 2026-11-05 |  | [2026-11-02-sf-review-training.md](2026-11-02-sf-review-training.md) |
+| 2026-11-02 | GLOW Club Reporting (D5) - 2026 only, a Month filter, item 17 renamed, an approval overview chart | done 2026-11-04 |  | [2026-11-02-sf-review-reporting.md](2026-11-02-sf-review-reporting.md) |
+| 2026-11-02 | Club Observation Dashboards (D3) - GLOW's names, 2026 only, a Month filter, the former PO off the filter | done 2026-11-04 |  | [2026-11-02-sf-review-observations.md](2026-11-02-sf-review-observations.md) |
+| 2026-11-02 | GLOW Club Implementation (D2) - 2026 only, a Month filter, unique partners per module, summit types, adapted modules as a table | done 2026-11-04 |  | [2026-11-02-sf-review-implementation.md](2026-11-02-sf-review-implementation.md) |
+| 2026-11-02 | GLOW Club Attendance (D1) - 2026 only, a Month filter, no double-counting totals, an overall chart | done 2026-11-04 |  | [2026-11-02-sf-review-attendance.md](2026-11-02-sf-review-attendance.md) |
+| 2026-11-02 | A reporting-year flag and a month name for the Monthly Report dashboards (2026 only, a Month filter) | done |  | [2026-11-02-sf-reporting-year.md](2026-11-02-sf-reporting-year.md) |
+| 2026-10-30 | The photo mover trashes Shared Drive photos 90 days after they arrive, at every level under each region folder, never the region folders | accepted |  | [2026-10-30-photo-retention.md](2026-10-30-photo-retention.md) |
+| 2026-10-26 | Item 12, "Partners that recruited new mentors", a component on GLOW Club Training (D4) | done 2026-10-26 |  | [2026-10-26-sf-new-mentors.md](2026-10-26-sf-new-mentors.md) |
+| 2026-10-26 | The session notes in Salesforce - Attendance_Batch__c.Session_Notes__c, mapped from each form's sessionNotes, and the audit that requires it | in-progress |  | [2026-10-26-session-notes-salesforce.md](2026-10-26-session-notes-salesforce.md) |
+| 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
+| 2026-10-25 | The optional session-notes field and its translations on all five attendance forms | done 2026-10-26 |  | [2026-10-25-session-notes.md](2026-10-25-session-notes.md) |
+| 2026-10-24 | GLOW Club Reporting (the dashboard "Reporting", items 17 and 18) and the GLOW of the Month table (item 19) by Partner and Month | done |  | [2026-10-24-sf-dash-reporting.md](2026-10-24-sf-dash-reporting.md) |
+| 2026-10-24 | GLOW Club Observations (D3) by partner and month, over the last 12 months | in-progress |  | [2026-10-24-sf-dash-observations.md](2026-10-24-sf-dash-observations.md) |
+| 2026-10-24 | GLOW Club Implementation (D2) by partner and month, over the last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-implementation.md](2026-10-24-sf-dash-implementation.md) |
+| 2026-10-24 | The GLOW Club Attendance dashboard (D1) and its reports by Partner and Month, last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-attendance.md](2026-10-24-sf-dash-attendance.md) |
+| 2026-10-24 | The corrections failed as "Duplicate" before 2026-10-24 re-sent, so the processor merges their missing girls | proposed |  | [2026-10-24-resend-duplicate-batches.md](2026-10-24-resend-duplicate-batches.md) |
 | 2026-10-24 | A Period date on the Monthly Report (DHIS2) records and in the Dhis2 report type, for the last-12-months period | done 2026-10-24 |  | [2026-10-24-dhis2-period-date.md](2026-10-24-dhis2-period-date.md) |
-| 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-10-24 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
+| 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | in-progress |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
 | 2026-10-23 | Move the Monthly Report (DHIS2) reports and dashboards off the keep list to Decommissioned | done 2026-10-24 |  | [2026-10-23-sf-retire-reports.md](2026-10-23-sf-retire-reports.md) |
+| 2026-10-23 | Historical duplicate and obsolete Accounts and Contacts flagged by Batch Apex (RecordFlagBatch), the sheet's criteria carried by a read-only script writer | done 2026-10-26 |  | [2026-10-23-sf-record-flag-batch.md](2026-10-23-sf-record-flag-batch.md) |
 | 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | done |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
 | 2026-10-22 | Roster changes sent as problem reports point their sender to the Club Roster Form, and girls "not on the form" count as one | proposed |  | [2026-10-22-roster-change-reports-to-roster-form.md](2026-10-22-roster-change-reports-to-roster-form.md) |
 | 2026-10-22 | Attendance processor - a corrected re-submission adds its missing girls to the day's original batch | in-progress |  | [2026-10-22-correction-merge.md](2026-10-22-correction-merge.md) |
