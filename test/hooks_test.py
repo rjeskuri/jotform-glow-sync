@@ -2181,29 +2181,77 @@ class Hooks(unittest.TestCase):
         "install -m 600 data/delete.cfg ~/.curlrc",
         "rsync -a data/delete.cfg $HOME/.curlrc",
         "ditto data/delete.cfg ~/.curlrc",
+        # curl also reads $XDG_CONFIG_HOME/.curlrc (orchestrator's ruling, 2026-11-06)
+        "echo 'request = \"DELETE\"' >> $XDG_CONFIG_HOME/.curlrc",
+        "cp data/delete.cfg \"${XDG_CONFIG_HOME}/.curlrc\"",
     ]
     # ... and what reads it, or copies it elsewhere (a file whose name only begins .curlrc is not it)
     CURLRC_NOT_WRITES = ["cat ~/.curlrc", "grep -n request ~/.curlrc", "ls -la ~/.curlrc \"$CURL_HOME/.curlrc\"",
                          "cp ~/.curlrc ~/.curlrc.bak", "cp ~/.curlrc data/curlrc-copy.txt",
-                         "echo x > ~/.curlrc.bak", "diff ~/.curlrc data/delete.cfg"]
+                         "echo x > ~/.curlrc.bak", "diff ~/.curlrc data/delete.cfg",
+                         "cat $XDG_CONFIG_HOME/.curlrc"]
+
+    def assert_refused_with_every_backup(self, commands):
+        """Each command refused - never asked - in a project with every backup from today, in
+        acceptEdits, bypassPermissions, dontAsk with GLOW_LIVE_OK=1 and from a subagent; each
+        refusal logged, only the project's control allowed."""
+        p = self.fully_backed()
+        self.assert_backed(p)
+        callers = [{"mode": "acceptEdits"}, {"mode": "bypassPermissions"}, {"mode": "dontAsk", "live_ok": "1"},
+                   {"mode": "auto", "agent": True}]
+        cases = [(command, dict(caller, project=p)) for command in commands for caller in callers]
+        for command, kw, run in self.verdicts(cases):
+            with self.subTest(command=command, caller=kw, backed=True):
+                self.assertEqual(self.verdict(run), "deny", self.show(run))
+        counts = collections.Counter(d for d, _ in self.lines_of(p))
+        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
+        self.assertNotIn("ASKED", counts, "a self-approval was asked, not refused")
+        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(cases), "each refusal logged")
+
+    # the startup files the gate protects (the shells', direnv's .envrc, the repository's .env),
+    # written by a copy, move, link, install, rsync or ditto onto them: a self-approval as a
+    # redirect into them is (orchestrator's ruling, 2026-11-06, on the gap found with the curlrc)
+    STARTUP_COPIES = [
+        "cp data/snippet.sh ~/.zshrc",
+        "cp -p data/snippet.sh $HOME/.zprofile",
+        "mv data/snippet.sh ~/.zshenv",
+        "ln -sf data/snippet.sh ~/.zlogin",
+        "install -m 644 data/snippet.sh ~/.bashrc",
+        "rsync -a data/snippet.sh ~/.bash_profile",
+        "ditto data/snippet.sh ~/.bash_login",
+        "cp data/snippet.sh \"$HOME/.profile\"",
+        "mv data/zshrc.new ~/.zshrc",
+        "mv data/envrc .envrc",
+        "ln -s data/envrc ./.envrc",
+        "ditto data/envrc .envrc",
+        "cp .env.example .env",
+        "cp -f data/env.txt \"$CLAUDE_PROJECT_DIR/.env\"",
+        "install -m 600 data/env.txt .env",
+        "rsync data/env.txt ./.env",
+    ]
+    # ... and copies FROM them, or onto a file whose name only begins like one (.env.bak,
+    # .zshrc.bak - READS already pins cp ~/.zshrc ~/.zshrc.bak silent)
+    STARTUP_COPIES_NOT_WRITES = [
+        "cp .env.example .env.bak",
+        "cp ~/.bashrc ~/.bashrc.bak",
+        "cp .envrc .envrc.bak",
+        "rsync -a ~/.zshrc data/zshrc.txt",
+        "ln -s ~/.zprofile data/zprofile-link",
+        "mv ~/.zshrc.bak ~/.zshrc.old",
+        "cp .env.example data/env-example.txt",
+    ]
+
+    def test_copying_moving_or_linking_onto_a_startup_file_is_refused_and_copying_from_one_is_not(self):
+        self.assert_refused_never_asked(self.STARTUP_COPIES)
+        self.assert_refused_with_every_backup(self.STARTUP_COPIES)
+        self.assert_no_decision(self.STARTUP_COPIES_NOT_WRITES)
 
     def test_writing_a_curlrc_is_refused_in_every_mode_and_reading_one_is_not(self):
         # with no backups: refused in default, auto, plan, dontAsk, a missing mode and from a
         # subagent, never asked, each refusal logged
         self.assert_refused_never_asked(self.CURLRC_WRITES)
         # with every backup on record, GLOW_LIVE_OK set, and in the modes that allow a backed write
-        p = self.fully_backed()
-        self.assert_backed(p)
-        callers = [{"mode": "acceptEdits"}, {"mode": "bypassPermissions"}, {"mode": "dontAsk", "live_ok": "1"},
-                   {"mode": "auto", "agent": True}]
-        cases = [(command, dict(caller, project=p)) for command in self.CURLRC_WRITES for caller in callers]
-        for command, kw, run in self.verdicts(cases):
-            with self.subTest(command=command, caller=kw, backed=True):
-                self.assertEqual(self.verdict(run), "deny", self.show(run))
-        counts = collections.Counter(d for d, _ in self.lines_of(p))
-        self.assertEqual(counts["ALLOWED"], 1, "only the control is allowed")
-        self.assertNotIn("ASKED", counts, "a curlrc write was asked, not refused")
-        self.assertEqual(counts["BLOCKED"] + counts["DENIED"], len(cases), "each refusal logged")
+        self.assert_refused_with_every_backup(self.CURLRC_WRITES)
         # the other side: reading it, or copying it elsewhere - no decision, nothing logged
         self.assert_no_decision(self.CURLRC_NOT_WRITES)
 
@@ -2288,6 +2336,8 @@ class Hooks(unittest.TestCase):
     EXPLICIT_SOURCE = [
         "sf project deploy start --source-dir data/sf_x/after -o glow",
         "sf project deploy start -d data/sf_x/after -o glow",
+        # -d joined to its folder is the same explicit source (orchestrator's ruling, 2026-11-06)
+        "sf project deploy start -ddata/sf_x/after -o glow",
         "sf project deploy start --source-dir=data/sf_x/after --target-org glow",
         "sf project deploy start -x data/sf_x/after/package.xml -o glow",
         "sf project deploy start --manifest data/sf_x/after/package.xml -o glow",
