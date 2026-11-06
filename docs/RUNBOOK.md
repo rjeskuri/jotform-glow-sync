@@ -3444,14 +3444,21 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   counts", Signals.
 
 **Filters:**
-- The dashboard's **Partner** filter covers every component. It holds the 49 partner names
-  that have clubs, typed in exactly (Salesforce allows 50 values per filter).
+- The dashboard's **Partner** filter covers every component. It holds 43 partner names, typed in
+  exactly (Salesforce allows 50 values per filter): the partners that have clubs, less the six
+  U.S partners since #209 (until #209 it held 49).
+- Since #209 (Ryan, 2026-11-05: the U.S partners are inactive) the Jotform Attendance dashboard's
+  Partner filter offers none of the six U.S partners: Angelo Patri School (`001RP000002nJZUYA2`),
+  Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
+  Farmington Municipal School District (`001RP00000F1DPBYA3`), HOLA (`001RP000002nJZXYA2`) and
+  Holbrook Unified School District (`001RP00000VxX9PYAV`).
   - A new partner must be added by hand to **both** lists: the dashboard's `partners.json`
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
-    automatically"). Two lists of the same 49 partners, kept separate on purpose: one is filter
-    text, the other account ids. Check its account name against the Monthly Reports' "test"
-    filter ("The keep list").
+    automatically"). The two lists are kept separate on purpose: one is filter text, the other
+    account ids. `glow/sf_partners.csv` keeps all 49 partners, the six U.S partners included:
+    #209 took them off the dashboard's filter only. Check its account name against the Monthly
+    Reports' "test" filter ("The keep list").
   - A renamed partner account makes its option show 0.
   - A 51st partner needs another layout, such as filter values by range.
 - **Club and girl** are filters on the reports, not on the dashboard. Click a chart, then use
@@ -3460,6 +3467,22 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   (tested 2026-10-02). In Salesforce, "Fundacion Bibliotec" has no accent and "Fundación
   Kaleidos" has one, so "Fundacion" finds only the first. Type the name as Salesforce spells it,
   or an unaccented part of it.
+
+**The U.S partners and the three monthly partners** (#209, Ryan, 2026-11-05;
+[plan and Result](plans/2026-11-05-sf-us-partners.md); DECISIONS 2026-11-05):
+- Since #209 the three not-submitted lists (Clubs Not Submitting - Last 14 Days, Clubs Not
+  Submitting - Since 1 Sept and Clubs With No Attendance Last Month) filter `PARENT.NAME notEqual`
+  the nine partners: the six U.S partners and the three monthly partners (Education and English
+  for You, Tumaini La Maisha, Ng'aa Maskani), the same value as Clubs Not Submitting - Last Week
+  (DECISIONS 2026-10-24).
+- The lists leave out the three monthly partners' clubs because coordinators use the lists to
+  chase Jotform submissions, and those partners report monthly through Salesforce, not Jotform.
+  The six U.S partners' 11 clubs leave them because the U.S partners are inactive and their form
+  is disabled (DECISIONS 2026-10-06).
+- The Girls Attended tiles keep the three monthly partners' `Partner report` batches: the tiles
+  count the Jotform girls and the three partners' Monthly Max together, as they did before #209.
+- The attendance-row reports stay unchanged by #209, because the U.S has no batches and no
+  attendance rows (0 `Attendance_Batch__c`, 0 `Attendance__c`).
 
 **Access** (Ryan's decisions of 2026-10-09,
 [plan](plans/2026-10-09-attendance-reports-public.md); they reverse his 2026-10-06 "folder
@@ -3714,6 +3737,20 @@ sharing stays as it is"):
   check-only, Ryan's go, deploy.
 - Nothing else depends on them. The pilot "Attendance" dashboard and its reports were not
   touched, nor the vendor's report type `Attendance_Batches`.
+- Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
+  VPN off, each deploy after a check-only and on Ryan's go:
+  - Round 2 (the three monthly partners) is undone first, then round 1 (the six U.S partners).
+  - Round 2: the three not-submitted lists are restored by a deploy from a fresh retrieve with
+    the three monthly partners taken out of their `PARENT.NAME` value, or by a deploy of their
+    files in `data/sf_us_partners_2026-11-05/round2/before/` only while a fresh retrieve equals
+    `round2/after/`.
+  - Round 1: the three not-submitted lists and the Jotform Attendance dashboard are restored by a
+    deploy of their files in `data/sf_us_partners_2026-11-05/before/`, only while a fresh retrieve
+    equals `after/`; otherwise from a fresh retrieve with the six U.S partners taken out of the
+    lists' value and the six Partner options restored to the dashboard from `before/`.
+  - The Attendance folders have no copies: the copy tool never takes them, so `before/` is the
+    record of what the lists and the dashboard were.
+  - Never from an older build or retrieve. Nothing is deleted.
 
 ## Submission timing in Salesforce
 
@@ -4066,6 +4103,34 @@ its record count off (`co` 0, describe `hasRecordCount: false`) and listed only 
 component, which measures `RowCount`, failed the refresh with 406 ("One or more of the fields
 selected in the component is no longer available in the report"). The check-only deploy passes
 such a component; only the refresh shows the 406.
+
+**The U.S partners** (#209, Ryan, 2026-11-05: inactive and distorting the totals;
+[plan and Result](plans/2026-11-05-sf-us-partners.md); DECISIONS 2026-11-05), deployed
+2026-11-05 on Ryan's go (deploy `0AfRP000002jNNV0A2`, check-only `0AfRP000002jNIf0AM`) and read
+back:
+- The six U.S partners are Angelo Patri School (`001RP000002nJZUYA2`), Detroit Public Schools
+  (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`), Farmington Municipal
+  School District (`001RP00000F1DPBYA3`), HOLA (`001RP000002nJZXYA2`) and Holbrook Unified School
+  District (`001RP00000VxX9PYAV`), region U.S: 11 Club accounts, 46 Monthly Reports in 2026.
+- Since #209 every Monthly report on D1-D5 and item 19, the stories table, filters
+  `DHIS2__c$Account__c notEqual` the six U.S partners, a locked criteria item beside the test
+  rule. D1-D5 themselves are unchanged; the U.S Monthly Reports of January-October 2026 leave them
+  retroactively.
+- The three monthly partners' Monthly Reports stay on D1-D5: those partners do report, through
+  Salesforce.
+- Item 6 and the attendance-row reports are unchanged by #209, because the U.S has no batches.
+- The SOQL signals in this section equal the dashboards' components only with
+  `AND Account__r.Name NOT IN (<the six>)` added to their `WHERE` since #209, because the
+  components leave out the six U.S partners.
+
+Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
+VPN off, after a check-only, on Ryan's go:
+- The 21 Monthly reports (the 20 on D1-D5 and item 19) are restored by a deploy from a fresh
+  retrieve with #209's `DHIS2__c$Account__c` criteria items removed, or from #209's own
+  `data/sf_us_partners_2026-11-05/before/` only while a fresh retrieve equals `after/`.
+- The copies in Decommissioned (tagged `#209`) are the record of what the reports were, not the
+  restore; item 11's metadata copy stays there too.
+- Never from an older build or retrieve. Nothing is deleted.
 
 ### Decommissioned
 
