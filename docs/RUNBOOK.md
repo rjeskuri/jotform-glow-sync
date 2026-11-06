@@ -3448,9 +3448,10 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   counts", Signals.
 
 **Filters:**
-- The dashboard's **Partner** filter covers every component. It holds 43 partner names, typed in
-  exactly (Salesforce allows 50 values per filter): the partners that have clubs, less the six
-  U.S partners since #209 (until #209 it held 49).
+- The dashboard's **Partner** filter covers every component. It holds 44 partner names since #212,
+  typed in exactly (Salesforce allows 50 values per filter): the partners that have clubs, less
+  the six U.S partners since #209, with the partner OMID Foundation (Asia, `001RP000002nJZiYAM`)
+  added by #212 (until #212 it held 43, until #209 49).
 - Since #209 (Ryan, 2026-11-05: the U.S partners are inactive) the Jotform Attendance dashboard's
   Partner filter offers none of the six U.S partners: Angelo Patri School (`001RP000002nJZUYA2`),
   Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
@@ -3460,7 +3461,7 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
     (the Partner filter's `Parent.Name` values, below) and `glow/sf_partners.csv` (the partner
     map the automatic club accounts read, partner → its account; "New clubs' accounts,
     automatically"). The two lists are kept separate on purpose: one is filter text, the other
-    account ids. `glow/sf_partners.csv` keeps all 49 partners, the six U.S partners included:
+    account ids. `glow/sf_partners.csv` keeps all 50 partners, the six U.S partners included:
     #209 took them off the dashboard's filter only. Check its account name against the Monthly
     Reports' "test" filter ("The keep list").
   - A renamed partner account makes its option show 0.
