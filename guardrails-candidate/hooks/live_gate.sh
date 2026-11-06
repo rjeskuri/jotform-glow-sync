@@ -25,7 +25,9 @@
 #     that approves itself is refused whatever the mode and the caller: one that
 #     sets GLOW_LIVE_OK, writes a file the next launch reads its environment from
 #     (~/.zshrc and the other shell startup files, a direnv .envrc, the repository's
-#     .env: a redirect, tee, sed -i or perl -i into one, or launchctl setenv), or
+#     .env: a redirect, tee, sed -i or perl -i into one, a cp, mv, ln, install,
+#     rsync or ditto onto one, or launchctl setenv), writes the .curlrc every curl
+#     reads (~/, $CURL_HOME/, $XDG_CONFIG_HOME/; the same ways), or
 #     forges a backup - writes, copies, touches or records .claude/live_backups.log
 #     by hand (a redirect whose target is the records: after the first > they, a $,
 #     a backtick or a glob appear), imports its writer glow/live_backups.py, or
@@ -75,12 +77,15 @@
 #                              (a ledger row, merge_rollback.json) before every write.
 #   Never automatic: gh api or api.github.com on dispatches or graphql; auto_sync.py
 #   with --apply-salesforce (Salesforce accounts, no rollback record); a metadata
-#   (mdapi) deploy (--metadata-dir, force:mdapi:deploy) and force:apex:execute; what
+#   (mdapi) deploy (--metadata-dir, force:mdapi:deploy) and force:apex:execute; a
+#   source-tracked one, which deploys local deletions too (Ryan, 2026-11-06):
+#   force:source:push, and a project deploy start or deploy metadata with no
+#   -d/--source-dir, -m/--metadata or -x/--manifest; what
 #   takes its method, URL, headers, body or flags from a file or standard input (review
 #   2 of PR #154: a request file or a composite body can hold a DELETE) - sf's
 #   --flags-dir, sf api request graphql (its --body names a file whenever one exists),
-#   sf api request rest with -f/--file or a --body @file or -, curl with -K/--config
-#   (any host), and to .salesforce.com/services/ an @, a < or a lone - anywhere (-d
+#   sf api request rest with -f/--file or a --body @file or -, every curl with
+#   -K/--config (live whatever host it names or none: Ryan, 2026-11-06), and to .salesforce.com/services/ an @, a < or a lone - anywhere (-d
 #   @file, -H @file, -F f=<file), -T/--upload-file, or a python3 -c snippet; any other tool (the
 #   Drive photo mover, upload_roster.py, deactivate_clubs.py, ...).
 #
@@ -145,10 +150,16 @@ GH="(^|[^[:alnum:]_.-])gh[[:space:]]+${REPO}"
 APPLY_ON='apply["'\'']?[[:space:]]*[=:][[:space:]]*["'\'']?([Tt][Rr][Uu][Ee]|1|[$@`])'
 PATTERN+="|${GH}(variable|secret)[[:space:]]+${REPO}(set|delete|remove)|${GH}workflow[[:space:]]+${REPO}(enable|disable)|${GH}run[[:space:]]+${REPO}rerun"
 PATTERN+="|${GH}workflow[[:space:]]+${REPO}run.*(${APPLY_ON}|--json|=@)|${APPLY_ON}.*${GH}workflow[[:space:]]+${REPO}run"
-# self-approval: the flag in the command, or written where the next launch picks it up
-STARTUP='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env)([^[:alnum:]_.-]|$)'
+# self-approval: the flag in the command, or written where the next launch picks it up - and
+# .curlrc (~/, $CURL_HOME/, $XDG_CONFIG_HOME/), which every curl reads its options from: a
+# `request = "DELETE"` there turns a backed curl into a delete (Ryan, 2026-11-06). Written by
+# a redirect, tee, sed -i or perl -i into one, or a cp, mv, ln, install, rsync or ditto onto
+# one (its name the last word, or the last before a ; & | or ) - a copy FROM one is no write)
+NAMES='(\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.envrc|\.env|\.curlrc)'
+STARTUP="${NAMES}([^[:alnum:]_.-]|\$)"
 WRITES='(>|tee[[:space:]]|sed[[:space:]][^;&|]*(-[[:alnum:]]*i|--in-place)|perl[[:space:]][^;&|]*-[[:alnum:]]*i)[^;&|]*'
-SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|launchctl[[:space:]]+setenv"
+COPIES="(^|[^[:alnum:]_.-])(cp|mv|ln|install|rsync|ditto)[[:space:]][^;&|]*[[:space:]/]${NAMES}[[:space:]]*(\$|[;&|)])"
+SELF="GLOW_LIVE_OK\\+?=|${WRITES}${STARTUP}|${COPIES}|launchctl[[:space:]]+setenv"
 PATTERN+="|${SELF})"
 # Prompt, don't parse (Ryan, 2026-10-14): the command is matched as text, never read as
 # shell words - a reader fails open on every gap between it and the shell, a text pattern
@@ -193,6 +204,31 @@ elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
   SF_API="sf api request rest that writes"
 fi
 [ -z "$MATCH" ] && MATCH=$SF_API
+# curl with a config file (Ryan, 2026-11-06): it sets the method, the URL and the data, so every
+# curl -K is live, whatever host it names or none - a -K (alone, joined to its file, or last in
+# a cluster of short options like -sSK, not inside -X's value) or --config (or a prefix curl
+# takes for it, --conf) after a curl word. Matched case-sensitively: -k is --insecure
+CURL_K='^-[^-X]*K' CURL_T='^-[^-X]*T'   # a short option in a cluster, not inside -X's value
+curl_config() {
+  local w seen=
+  while IFS= read -r w; do
+    case "$w" in [Cc][Uu][Rr][Ll] | */[Cc][Uu][Rr][Ll]) seen=1; continue ;; esac
+    [ -n "$seen" ] || continue
+    case "$w" in
+      --conf*) ;;
+      --*) continue ;;
+      -*) [[ $w =~ $CURL_K ]] || continue ;;
+      *) continue ;;
+    esac
+    printf '%s' "$w"
+    return 0
+  done <<EOF
+$(set -f; printf '%s\n' $BARE)
+EOF
+  return 1
+}
+CURL_CONF=$(curl_config) || CURL_CONF=
+[ -z "$MATCH" ] && MATCH=$CURL_CONF
 # A forged backup is a self-approval too (#146): the records the automatic go trusts
 # (.claude/live_backups.log, any spelling of its path) named together with a write verb, or
 # as a redirect's target - anywhere after the command's first > it names them, a $, a
@@ -349,12 +385,18 @@ query). Take the before/ with sf project retrieve start ... --target-dir
 data/sf_<topic>/before, or save a query there, alone: sf data query ... >
 data/sf_<topic>/before/<name>.csv (or sf data export ... --output-dir it)." ;;
     *) HOW="It sets GLOW_LIVE_OK, or writes a file the next launch reads its environment from (a
-shell startup file, .envrc, .env), or runs launchctl setenv." ;;
+shell startup file, .envrc, .env: a redirect, tee or edit in place into it, or a copy, move or
+link onto it), or the .curlrc every curl reads its options from, or runs launchctl setenv." ;;
   esac
   refuse "The command approves itself. $HOW
 Nothing pre-approves a live command: a backup tool's own record, or Ryan's answer to the
 session's prompt, is the go. GLOW_LIVE_OK grants nothing since 2026-10-14."
 fi
+
+# every curl with a config file (Ryan, 2026-11-06): before the delete words, so the reason names
+# the config file even when its name holds one
+[ -n "$CURL_CONF" ] && not_automatic "curl with a config file ($CURL_CONF) is never automatic, whatever host it names or none: its
+method, URL and data come from a file the gate does not read (Ryan, 2026-11-06)."
 
 # DELETES ask whatever the backups (Ryan, 2026-10-26): --prune (and the words argparse
 # takes for it or --remove: --pr, --re, ...), delete, remove or destructive in any case and
@@ -633,24 +675,7 @@ for f in $FAMILIES; do
 done
 
 # Review 2 of PR #154: what the gate decides on - the method above all, a DELETE or not - must be
-# in the command's text. A curl config file (-K, --config or a prefix curl takes for it, --conf;
-# a cluster like -sSK) sets the method, the URL and the data, for any host
-CURL_K='^-[^-X]*K' CURL_T='^-[^-X]*T'   # a short option in a cluster, not inside -X's value
-if [ "$LAUNCHER" = curl ]; then
-  while IFS= read -r w; do
-    case "$w" in
-      --conf*) ;;
-      --*) continue ;;
-      -*) [[ $w =~ $CURL_K ]] || continue ;;
-      *) continue ;;
-    esac
-    nope "curl with a config file ($w) is never automatic: its method, URL and data come from a file the gate does not read."
-    break
-  done <<EOF
-$(words)
-EOF
-fi
-# ... and a Salesforce REST request - sf api request rest, or the URL - whose method, URL, headers
+# in the command's text (a curl config file: never automatic, above). A Salesforce REST request - sf api request rest, or the URL - whose method, URL, headers
 # or body come from a file or standard input (a request file carries its own method, a composite
 # body can hold DELETE sub-requests): a < redirect, an @ anywhere (sf's --body @file; curl's -d,
 # --data*, --json, -H, -F, --variable or --url-query with @file or @-), a lone - (sf's --body -,
@@ -668,6 +693,22 @@ sf_request_file() {
     esac
     printf '%s' "$w"
     return 0
+  done <<EOF
+$(words)
+EOF
+  return 1
+}
+
+# a deploy's explicit source: -d/--source-dir, -m/--metadata, -x/--manifest, each also joined to
+# its value (-d<path>, --source-dir=<path>); --results-dir and --metadata-dir are none
+explicit_source() {
+  local w
+  while IFS= read -r w; do
+    case "$w" in
+      --source-dir | --source-dir=?* | --metadata | --metadata=?* | --manifest | --manifest=?*) return 0 ;;
+      --*) ;;
+      -[dmx]*) return 0 ;;
+    esac
   done <<EOF
 $(words)
 EOF
@@ -729,6 +770,12 @@ if [ -z "$WHY" ]; then
         # read here; anonymous Apex only from a file the gate read above
         if has '--metadata-dir|force:mdapi:'; then
           nope "a deploy of a metadata (mdapi) folder (--metadata-dir, force:mdapi:deploy) is never automatic: deploy a source folder (--source-dir)."
+        # a source-tracked push or deploy deploys local deletions too, which the gate does not
+        # see (Ryan, 2026-11-06)
+        elif has 'force:source:push'; then
+          nope "sfdx force:source:push is never automatic: it pushes the project's tracked changes, local deletions too. Deploy an explicit source: sf project deploy start --source-dir, --manifest or --metadata."
+        elif has "${SF}(project[[:space:]]+deploy[[:space:]]+start|deploy[[:space:]]+metadata)" && ! explicit_source; then
+          nope "a deploy with no explicit source deploys the project's tracked changes, local deletions too: it goes through only with -d/--source-dir, -x/--manifest or -m/--metadata."
         elif has 'force:apex:execute'; then
           nope "force:apex:execute is never automatic: sf apex run --file <a file in the checkout> is, when that file deletes nothing."
         elif [ "$APEX" = none ]; then
@@ -772,6 +819,7 @@ sf_topics() {
   local w
   while IFS= read -r w; do
     w=${w#--*=}
+    case "$w" in -?data/*) w=${w#-?} ;; esac   # a short flag joined to its folder: -ddata/sf_x
     w=${w#@}
     w=${w#./}
     case "$w" in data/sf_*/?*) ;; *) continue ;; esac

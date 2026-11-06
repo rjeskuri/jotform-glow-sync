@@ -5772,7 +5772,11 @@ The backups, from today (the Mac's local date), and the command that makes each:
   request rest` writes, `.salesforce.com/services/`: no record; the command names a
   path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
   modified today (the plan's `before/` retrieve, or a lone `sf data query` or `sf
-  data export` saved there). `apex run` also needs
+  data export` saved there). A deploy (`sf project deploy start`, `sf deploy
+  metadata`) also needs an explicit source - `-d`/`--source-dir`,
+  `-m`/`--metadata` or `-x`/`--manifest` (joined too: `-d<path>`,
+  `--source-dir=<path>`): with none it deploys the project's tracked changes,
+  local deletions included (Ryan, 2026-11-06). `apex run` also needs
   `--file` (`-f`) naming a file the hook reads: a regular file inside the
   checkout, no link. A REST request (`sf api request rest`, `curl` to
   `.salesforce.com/services/`) also needs the whole request on the command line:
@@ -5790,8 +5794,9 @@ The backups, from today (the Mac's local date), and the command that makes each:
 
 Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
 `auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
-metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`) and
-`force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read;
+metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`), a
+source-tracked one (`sfdx force:source:push`, or a deploy with no `-d`, `-m` or
+`-x`), `force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read;
 a request whose method, URL, headers, body or flags come from a file or standard
 input, which the hook does not read either (review 2 of PR #154: a request file, a
 composite body, a header file or a flags folder can hold a DELETE) - `sf`'s
@@ -5801,8 +5806,9 @@ request rest`, `.salesforce.com/services/`) with `sf`'s `-f`/`--file`, `curl`'s
 `-T`/`--upload-file`, a `<`, a lone `-` (`--body -`, `--body=-`; `curl`'s `-o -`
 counts too) or an `@` in any word
 (`--body @file`, `-d @file`, `-H @file`, `-F f=@file`; an e-mail address in an
-inline body counts too), or sent by a `python3 -c` snippet; `curl` with a config
-file (`-K`, `--config`), whatever the host; any
+inline body counts too), or sent by a `python3 -c` snippet; every `curl` with a
+config file (`-K`, `-K<file>`, `-sSK`, `--config`), whatever host it names or
+none (Ryan, 2026-11-06: the file sets the method, the URL and the data); any
 tool the hook does not list (the Drive photo mover, `upload_roster.py`,
 `deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
 
@@ -5824,7 +5830,10 @@ notifications. Without `osascript` (Linux, CI) there is no notification; the
 Refused outright (a `deny`), whatever the mode and the caller, a self-approval:
 a command that sets `GLOW_LIVE_OK`, writes a file the next launch takes its
 environment from (`~/.zshrc` and the other shell startup files, `.envrc`, `.env`:
-a redirect, `tee`, `sed -i`, `perl -i`), or `launchctl setenv`; and a forged
+a redirect, `tee`, `sed -i`, `perl -i`, or a `cp`, `mv`, `ln`, `install`, `rsync`
+or `ditto` onto one, not a copy from one), or `launchctl setenv`; the same writes
+to `~/.curlrc` (or `$CURL_HOME/.curlrc`, `$XDG_CONFIG_HOME/.curlrc`), which every
+`curl` reads its method and options from (Ryan, 2026-11-06); and a forged
 backup - `.claude/live_backups.log` written, copied, moved, linked, touched or
 truncated by hand (any spelling of its path; a redirect whose target is the
 records, or one the hook cannot read: a variable, a substitution, a glob), its

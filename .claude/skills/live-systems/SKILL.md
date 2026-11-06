@@ -27,7 +27,8 @@ one simple command of a tool or raw shape the hook lists. The backups: `backup_f
 today for a raw `sf` write, a Salesforce tool's own ledger. Deletes and `--prune` still ask Ryan
 in the session, and are refused where no prompt can show; so is a write without its backup, and
 any other live command. It refuses outright a self-approval (setting `GLOW_LIVE_OK`, writing a
-shell startup file or `.env`, `launchctl setenv`, a backup record or a `before/` made by hand). A
+shell startup file, `.env` or `~/.curlrc` - a copy onto one too -, `launchctl setenv`, a backup
+record or a `before/` made by hand). Every `curl -K`/`--config` asks, whatever the host. A
 read-only command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. The hook
 is a seatbelt: it does not see the connectors or a write through another program, and a write it
 does not see needs Ryan's explicit go in this conversation. RUNBOOK "Live gate (Claude Code)".
