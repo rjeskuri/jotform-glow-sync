@@ -141,9 +141,19 @@ submission, names included. The native integration is the only route this plan c
      `<club> - <partner>` for the seven same-name clubs) if the picker offers it, otherwise the
      Club picker (the template's q444; a different id per form: Africa q446, Asia q447, Latin
      America q452); the date is question 17. **Never question 18, never a roster**;
+     - 2026-10-30 (Ryan): until 2026-10-30 the builder's subfolder name was the club name only,
+       not `<Club Name> <Attendance Date>`, so one subfolder could hold photos of many dates.
+       Since 2026-10-30 it is `{Club Name} {Date}` on the Template, Africa, Asia and Latin America
+       forms (the U.S form is disabled), set by Ryan in the builder: question 17 is labelled
+       "Date" (mmddyyyy with `-`), e.g. `Sunrise Club 10-30-2026`
+       ([retention plan](2026-10-30-photo-retention.md));
    - the photo stays **required** on every form (DECISIONS 2026-09-12 stands);
    - **sharing = the owner plus a short named list** (who: open, CEO / Ryan);
    - **retention: open, the CEO's decision**; until it is taken nothing is deleted from Drive;
+     - 2026-10-30 (Ryan, the CEO's approval): photos on the company Shared Drive go to its trash
+       90 days after they arrive, trash only, never deleted for good; the photo mover does it
+       once its retention is live, and until then nothing is deleted from Drive (DECISIONS
+       2026-10-30, [retention plan](2026-10-30-photo-retention.md));
    - the existing 677 photos stay in Jotform (no manual export unless staff ask: BACKLOG 69);
    - Jotform's "Require log-in to view uploaded files" stays on; "Auto Delete Submissions" stays
      off: `tools/backfill_resolve.py` and the daily question-18-versus-ticks comparison
@@ -452,6 +462,9 @@ before and diffed after), his test submission (step 5) and the deletion of the o
      company Shared Drive ([plan](2026-10-21-drive-photo-mover.md)).
 2. **Sharing**: the named list beside the owner.
 3. **Retention** in Drive: the CEO's; recorded in DECISIONS and the RUNBOOK when taken.
+   - 2026-10-30 (Ryan, the CEO's approval): 90 days on the company Shared Drive, then its trash
+     (trash only); recorded in DECISIONS 2026-10-30 and RUNBOOK "Photos"; built and rolled out
+     by epic #179 ([retention plan](2026-10-30-photo-retention.md)).
 4. **The test submission's leftovers**: delete the Failed `Duplicate:` batch (recommended) and
    the Jotform submission (recommended; it frees no space for 30 days).
 5. **Thresholds**: warn at 50 %, ATTENTION at 80 %, of each limit on its own (proposed);

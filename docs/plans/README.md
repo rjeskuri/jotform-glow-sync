@@ -13,6 +13,14 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-05 | The six U.S partners off every dashboard and report; the not-submitted lists without the monthly partners | done 2026-11-06 |  | [2026-11-05-sf-us-partners.md](2026-11-05-sf-us-partners.md) |
+| 2026-11-02 | Mentors (D4) - 2026 only, a Month filter, the former PO off the filter | done 2026-11-05 |  | [2026-11-02-sf-review-training.md](2026-11-02-sf-review-training.md) |
+| 2026-11-02 | GLOW Club Reporting (D5) - 2026 only, a Month filter, item 17 renamed, an approval overview chart | done 2026-11-04 |  | [2026-11-02-sf-review-reporting.md](2026-11-02-sf-review-reporting.md) |
+| 2026-11-02 | Club Observation Dashboards (D3) - GLOW's names, 2026 only, a Month filter, the former PO off the filter | done 2026-11-04 |  | [2026-11-02-sf-review-observations.md](2026-11-02-sf-review-observations.md) |
+| 2026-11-02 | GLOW Club Implementation (D2) - 2026 only, a Month filter, unique partners per module, summit types, adapted modules as a table | done 2026-11-04 |  | [2026-11-02-sf-review-implementation.md](2026-11-02-sf-review-implementation.md) |
+| 2026-11-02 | GLOW Club Attendance (D1) - 2026 only, a Month filter, no double-counting totals, an overall chart | done 2026-11-04 |  | [2026-11-02-sf-review-attendance.md](2026-11-02-sf-review-attendance.md) |
+| 2026-11-02 | A reporting-year flag and a month name for the Monthly Report dashboards (2026 only, a Month filter) | done |  | [2026-11-02-sf-reporting-year.md](2026-11-02-sf-reporting-year.md) |
+| 2026-10-30 | The photo mover trashes Shared Drive photos 90 days after they arrive, at every level under each region folder, never the region folders | accepted |  | [2026-10-30-photo-retention.md](2026-10-30-photo-retention.md) |
 | 2026-10-26 | Item 12, "Partners that recruited new mentors", a component on GLOW Club Training (D4) | done 2026-10-26 |  | [2026-10-26-sf-new-mentors.md](2026-10-26-sf-new-mentors.md) |
 | 2026-10-26 | The session notes in Salesforce - Attendance_Batch__c.Session_Notes__c, mapped from each form's sessionNotes, and the audit that requires it | in-progress |  | [2026-10-26-session-notes-salesforce.md](2026-10-26-session-notes-salesforce.md) |
 | 2026-10-25 | GLOW Club Training (D4, "Mentors") by partner and month, over the last 12 months | in-progress |  | [2026-10-25-sf-dash-training.md](2026-10-25-sf-dash-training.md) |
