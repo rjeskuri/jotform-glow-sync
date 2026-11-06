@@ -5832,8 +5832,8 @@ a command that sets `GLOW_LIVE_OK`, writes a file the next launch takes its
 environment from (`~/.zshrc` and the other shell startup files, `.envrc`, `.env`:
 a redirect, `tee`, `sed -i`, `perl -i`, or a `cp`, `mv`, `ln`, `install`, `rsync`
 or `ditto` onto one, not a copy from one), or `launchctl setenv`; the same writes
-to `~/.curlrc` (or `$CURL_HOME/.curlrc`, `$XDG_CONFIG_HOME/.curlrc`), which every
-`curl` reads its method and options from (Ryan, 2026-11-06); and a forged
+to `~/.curlrc` (or `$CURL_HOME/.curlrc`), which every `curl` reads its method
+and options from (Ryan, 2026-11-06); and a forged
 backup - `.claude/live_backups.log` written, copied, moved, linked, touched or
 truncated by hand (any spelling of its path; a redirect whose target is the
 records, or one the hook cannot read: a variable, a substitution, a glob), its
@@ -5877,7 +5877,13 @@ through another program, a flag assembled at run time, and the session's
 connector tools (Salesforce through claude.ai) are not seen - it guards against
 mistakes, not intent. It checks that a backup of today is on record, not that
 the backup is complete or restorable; and a raw `sf` write is backed by the plan
-folder it names, not by what else it deploys. Before answering yes to a prompt:
+folder it names, not by what else it deploys. Known gaps, accepted at #146's final
+review (2026-11-06): curl also reads `$XDG_CONFIG_HOME/curlrc` (no dot), which the
+gate does not protect; a copy onto a startup file or `~/.curlrc` followed by a
+redirect, a `#` comment or a line break, or one copying a file named `.curlrc`
+into a folder (`cp x/.curlrc ~/`), gets no decision; and the colon spellings of sf
+commands (`sf project:deploy:start`, `sf data:delete:record`) are not seen, so the
+spaced spelling is the one to use. Before answering yes to a prompt:
 read the dry run and check the backup exists. Running commands yourself in a
 terminal is never affected.
 
