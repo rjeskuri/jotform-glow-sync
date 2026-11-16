@@ -3,7 +3,8 @@
     "CLAUDE_VERIFY_CMD": "scripts/verify.sh",
     "HARNESS_TEST_CMD": "scripts/harness_tests.sh {files}",
     "HARNESS_WORKTREE_SETUP": "test -d ../../../.venv && ln -sfn ../../../.venv .venv || true",
-    "HARNESS_ULTRAREVIEW": "off"
+    "HARNESS_ULTRAREVIEW": "off",
+    "HARNESS_SENSITIVE_PATHS": "data/**,backups/**,credentials/**"
   },
   "permissions": {
     "allow": [
