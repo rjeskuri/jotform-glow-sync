@@ -987,8 +987,11 @@ class GateSettings(unittest.TestCase):
             self.assertIn(rule, self.permissions["ask"])
         self.assertEqual(self.permissions["deny"], self.DENY_BEFORE)
         self.assertEqual(sorted(self.settings["env"]),
-                         ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_ULTRAREVIEW", "HARNESS_WORKTREE_SETUP"])
+                         ["CLAUDE_VERIFY_CMD", "HARNESS_SENSITIVE_PATHS", "HARNESS_TEST_CMD", "HARNESS_ULTRAREVIEW",
+                          "HARNESS_WORKTREE_SETUP"])
         self.assertEqual(self.settings["env"]["HARNESS_ULTRAREVIEW"], "off")   # no ultrareview: it bills usage credits (2026-10-26)
+        # personal-data folders marked sensitive for the Harness backup store (Ryan, 2026-11-05): a later edit must not drop one
+        self.assertEqual(self.settings["env"]["HARNESS_SENSITIVE_PATHS"], "data/**,backups/**,credentials/**")
 
     def test_the_live_gate_still_runs_on_every_bash_command(self):
         pre = self.settings["hooks"]["PreToolUse"]
