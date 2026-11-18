@@ -2771,7 +2771,12 @@ class GateSettings(unittest.TestCase):
         self.assertEqual(self.permissions["deny"], self.DENY_BEFORE)
         missing = [rule for rule in self.ALLOW_BEFORE if rule not in self.permissions["allow"]]
         self.assertEqual(missing, [], "an allow rule was dropped")
-        self.assertEqual(sorted(self.settings["env"]), ["CLAUDE_VERIFY_CMD", "HARNESS_TEST_CMD", "HARNESS_WORKTREE_SETUP"])
+        self.assertEqual(sorted(self.settings["env"]),
+                         ["CLAUDE_VERIFY_CMD", "HARNESS_SENSITIVE_PATHS", "HARNESS_TEST_CMD", "HARNESS_ULTRAREVIEW",
+                          "HARNESS_WORKTREE_SETUP"])
+        self.assertEqual(self.settings["env"]["HARNESS_ULTRAREVIEW"], "off")   # no ultrareview: it bills usage credits (2026-10-26)
+        # personal-data folders marked sensitive for the Harness backup store (Ryan, 2026-11-05): a later edit must not drop one
+        self.assertEqual(self.settings["env"]["HARNESS_SENSITIVE_PATHS"], "data/**,backups/**,credentials/**,.env,.env.*")
 
     # F6 of PR #154's review: in dontAsk (a headless run) only allow-listed commands run, so the
     # backups the automatic go needs - besides backup_forms.py and one tab's export, allowed already

@@ -3380,9 +3380,21 @@ from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-
 Its label lost "(test)" with the 2026-10-09 Access deploy (below); the DeveloperName keeps it.
 
 What it shows - the headline tiles (below), weekly and monthly charts, last month by partner and
-by module, the clubs with no attendance or not submitting, the blank submissions - and how to
+by module, the clubs with no attendance or not submitting, and since #231 (2026-11-18) a table of
+girls present by club and date in place of the blank-submissions tile - and how to
 read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
 month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
+
+**Girls present by club and date** (#231, 2026-11-18, Ryan: "replace the blank response report with
+the Attendance by club by date report"): a full-width table from "Attendance By Club By Date"
+(`Attendance_By_Club_By_Week_Wdl`, `00ORP000007uBRN2A2`): club, session day (newest first), girls
+present, last 90 days; it follows the Partner and Region filters, and the report behind it has
+Region, Partner and Club filters any viewer can set (#226). The report is grouped by the club
+account (`Account$Name`) and the attendance date by day; a dashboard table names those groupings
+by their Analytics API names (`Account.Name`, `Attendance__c.Attendance_Date__c`), not the report
+type's `$` names, and needs a sort. The "Blank Submissions" report stays in the Attendance folder;
+only the tile is gone, and the two tiles beside it are 6 columns wide
+([plan](plans/2026-11-18-sf-dash-club-date-table.md)).
 
 **The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
 deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
@@ -3454,6 +3466,14 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   typed in exactly (Salesforce allows 50 values per filter): the partners that have clubs, less
   the six U.S partners since #209, with the partner OMID Foundation (Asia, `001RP000002nJZiYAM`)
   added by #212 (until #212 it held 43, until #209 49).
+- The dashboard's **Region** filter (since #222, 2026-11-18) covers every component too: Africa,
+  Asia, North America, South America. It reads the formula field `Account.Partner_Region__c` (the
+  partner's `Region__c` on a club, its own on a partner account), in each report type's terms:
+  `Account.Partner_Region__c` (the standard Accounts reports), `Account$Partner_Region__c`
+  (`Accounts_Contacts_Attendance`), `Attendance_Batch__c$Account__c.Partner_Region__c` (the two
+  batch report types). Nothing to keep: a new club follows its partner. A club whose partner has
+  no Region shows under no region. A new region value is added to the filter by hand
+  ([plan](plans/2026-11-18-sf-region-filter.md)).
 - Since #209 (Ryan, 2026-11-05: the U.S partners are inactive) the Jotform Attendance dashboard's
   Partner filter offers none of the six U.S partners: Angelo Patri School (`001RP000002nJZUYA2`),
   Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
@@ -3531,7 +3551,9 @@ sharing stays as it is"):
   - Read on the 21 fields that the reports in both folders show, filter or group, the pilot
     reports included, and since 2026-10-21 (#59) the three new fields
     `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c` and
-    `Attendance__c.Has_Row__c`. The list is in the plan; the derivation is
+    `Attendance__c.Has_Row__c`, and since 2026-11-18 (#222) `Account.Partner_Region__c`, the
+    Region filter's field (also readable in the System Administrator profile, the dashboard's
+    running user). The list is in the plan; the derivation is
     `public_2026-10-09/evidence/`.
   A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
   Report". Every per-girl report filters on `Creator__c`: without it, the totals would include

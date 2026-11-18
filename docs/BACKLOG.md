@@ -45,15 +45,7 @@ Status: blocked-on-ryan
 - Effort: 1–2 elapsed weeks of emails; 0.3 tooling
 - Who: needs Ryan/partners
 - 2026-10-09: the tool that wrote the report, `tools/needs_attention.py`, is retired ([Retired tools](ARCHITECTURE.md#retired-tools)); the report itself stays in `data/`.
-
-### 5. Confirm Haske's region
-
-Status: blocked-on-ryan
-
-- **Confirm Haske's region** (Partners tab says Africa on thin evidence; row is marked PLEASE CONFIRM)
-- Why: wrong region = wrong form
-- Effort: 0.05
-- Who: needs Ryan
+- 2026-11-13 (Ryan, #215): the ReviewQueue's 114 open "Removal did not match anyone" items are resolved as flushed: a removal that matches nobody is the partner's to send again correctly. Otra Cosa's combined and split clubs: answered by the partner's name list (21).
 
 ### 6. Close the old enrollment Google Form
 
@@ -63,24 +55,6 @@ Status: blocked-on-ryan
 - Why: avoids a third path into the data
 - Effort: 0.05
 - Who: needs the form's owner
-
-### 6a. Native-speaker check of the Odia labels
-
-Status: blocked-on-ryan
-
-- **Native-speaker check of the Odia labels** (`tools/translations_or.json`, 63 strings) by a VIEWS mentor; corrections re-applied with `tools/add_language.py --code or --name Oriya --dict … --apply`
-- Why: the other languages came from Jotform's machine translation; Odia was written by us
-- Effort: 0.1 + partner time
-- Who: needs VIEWS
-
-### 6b. Native-speaker check of the Hindi and Persian labels
-
-Status: blocked-on-ryan
-
-- **Native-speaker check of the Hindi and Persian labels** on the Asia form (`tools/translations_hi.json`, `tools/translations_fa.json`, 52 strings each, written 2026-09-20 with a three-lens review); corrections re-applied with `tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict … --apply` (Persian: `--code fa --name Persian`)
-- Why: written by us, like Odia; Persian readers may be Afghan (Dari)
-- Effort: 0.1 + partner time
-- Who: needs a Hindi and a Persian speaker
 
 ## The automatic sync
 
@@ -105,6 +79,7 @@ Status: in-progress
 - **handler guard built 2026-09-28** on branch `wf/duplicate-club-guard` (`docs/plans/2026-09-28-duplicate-club-guard.md`), merged 2026-09-29, **deployed 2026-09-30 (the same-name push; RUNBOOK "Apps Script deploy")**
 - remaining: the form-side "Is your club one of these?" question; the duplicates already imported (Reach All ×6, Otra Cosa, YWOU)
 - Effort: 1
+- 2026-11-13 (Ryan, #215): the 12 held new clubs in the ReviewQueue are settled. 4 are released (RAWSA/Tamkeen Club one and Club two, See Them Grow's Sparkle Squad, Reach All's BRIGHT DIAMONDS sent twice: the later copy). 8 are resolved without a release because their girls are already active in a club on file: Kawempe's Burning Flames, CCCYD's Fearless (two copies) and Kimiteto, and CCCYD's Hope builders (two copies) and AMAZING GIRL CLUB, whose girls are on two CCCYD clubs named with a person's name. Those two clubs are renamed in the follow-up ticket.
 
 ## Dynamic roster picker pilot (the "backend upgrade")
 
@@ -193,6 +168,7 @@ Status: in-progress
 
 - Resolve the `RENAMED_ON_FORM` clubs (Otra Cosa ×3) and the "Setidevi G.L.O.W club , Sokhel" stray-space spelling so each club has one question; then delete the orphan questions from the template and regionals
 - **Setidevi done 2026-09-30**: the orphan q158 (old spelling, 0 answers) deleted from all five forms, the picker entry gone (DECISIONS 2026-09-30); Otra Cosa's three remain
+- 2026-11-13 (Ryan): Otra Cosa sent the names going forward, one club per level: San Carlos primaria, San Carlos secundaria, Las Lomas Primaria, Las Lomas secundaria, Cerrito Primaria (now "Cerrito de la Virgen"), Cerrito Secundaria, Las Camelias primaria (now "Las Camelias") and Las Camelias Secundaria (now "Las Camelias - Secundaria"). The three renames wait for the Salesforce login (the Account is renamed first); the follow-up ticket also covers the combined "Cerrito", "Las Lomas" and "San Carlos", which are not on the list.
 
 ### 22. Decide what to do with "Queens of Baleng"
 
@@ -362,13 +338,6 @@ Status: in-progress
 - 2026-10-09: `.claude/hooks/live_gate.sh` now gates `sf`/`sfdx` writes and deploys, the REST API, `--rehearse`, `gh variable|secret set|delete`, `gh workflow run` that applies, `gh run rerun` and `gh api` writes (8a04c16, cc43d1b, d9c7053; RUNBOOK "Live gate (Claude Code)"). Not done: denying `~/.sfdx` / `~/.sf` in `.claude/settings.json`, the `settings.local.json` moves, dropping the workflow's `repository_dispatch` trigger.
 - 2026-10-09 (after the hooks' review): the write side is gated - `sf`/`sfdx` deploys, data writes, Apex, the `force:` commands and the REST URL; `gh` variable, secret and workflow switches, reruns and `gh api` writes; self-approval through a shell startup file (8d24497). Also still open: `sf org auth show-access-token` (it prints the token, and as a read it passes) and `sf api request` (its relative REST path escapes the `.salesforce.com/services/` pattern); the three of the bullet above stay open, the read denial of `~/.sf` / `~/.sfdx` in `.claude/settings.json` among them (Ryan's file).
 
-### 55. Monthly Report leftovers
-
-Status: blocked-on-ryan
-
-- **Monthly Report leftovers** (`docs/plans/2026-09-30-monthly-report-checkbox.md`): the new field is visible to System Administrator only (which other profiles?); an empty week is stored as 0, not blank; the production form sends a logged-out visitor to the **sandbox** login page (Ryan: leave it for now); the controller fails on an existing report when a save does not send three fields it reads back (the form always sends them).
-- Also: on 2026-09-30 12:42 UTC another administrator re-activated the former staff administrator's user - Ryan to ask whether that was intended
-
 ### 56. Two clubs picked, then the form's own language switcher, lifts the club guard
 
 Status: open
@@ -392,13 +361,6 @@ Status: open
 - **Attendance rate on the dashboard ("% of the maximum attendance possible")** - the line chart Ryan asked for on 2026-10-02, left out because Salesforce has no enrolled count (`docs/plans/2026-10-02-attendance-dashboard.md`, "Later"). Ryan's definition: a session's maximum is the girls active on that club's roster in the sheet **on the session date** (the Roster's `added_date` / `removed_date`; removed girls drop out from their removal date), only for sessions held; **nothing more on the forms**.
 - Needs: two number fields on `Attendance_Batch__c` (girls present = its attendance rows; girls enrolled), a small repo tool that fills them from the roster export (club code → account id from `data/sf_prep_2026-09-30/created_accounts*.csv`, dry run, then `--apply` on Ryan's go, idempotent), a sessions report type with the summary formula SUM(present) / SUM(enrolled), then a line by week and a number for last month. Keeping it current without a hand run needs Salesforce access from GitHub Actions or a nightly Salesforce flow
 
-### 59. Region on the attendance dashboard
-
-Status: open
-
-- **Region on the attendance dashboard.** Region is on the partner account (`Parent.Region__c`: Africa, Asia, North America, South America), not on clubs, and the report type `Accounts_Contacts_Attendance` cannot reach the partner's fields.
-- Either a new report type (base `Attendance__c` with lookups to the club, its partner and the partner's region), or a region on every Club account kept by the club tooling; then a Region dashboard filter (4 values) and charts by region
-
 ### 60. Attendance dashboard leftovers
 
 Status: blocked-on-ryan
@@ -409,6 +371,7 @@ Status: blocked-on-ryan
 - **2026-10-16**: the 2026-10-09 Access change is deployed: Salesforce metadata dates show the permission set `Attendance_Report_Viewer` and the renamed reports at ~05:35 UTC on 2026-10-09. Not checked: the folder shares, the permission-set assignments and the daily refresh
 - **Decided 2026-10-06 (Ryan)**: folder sharing stays as it is (hidden; administrators only), and girls' names are fine for anyone with Salesforce access, so (1) and (3) below are closed.
 - (1) share the two Attendance folders, with whom - closed 2026-10-06 with no change, reopened and decided 2026-10-09 (above); (2) record sharing, only if the folders are ever shared beyond administrators: the dashboard runs as Ryan, but a chart opens its report as the viewer, and club accounts are private (administrator-owned, no sharing rules), so a standard user sees few or no rows there; options: give leadership View All Data, or add a sharing rule on Club accounts (and check that the Contacts and `Attendance__c` rows follow it: the report type reads all three); (3) the test report's detail rows carry girls' names - closed, allowed inside Salesforce; (4) a daily scheduled refresh (Refresh > Schedule Refresh); (5) drop "(test)" from the names once it is the real one; (6) the Partner filter holds 49 of its 50 values by hand: a new or renamed partner needs an edit; (7) `BATCH-000500` (Niñas Emprendedoras y Empoderadas, submitted 2026-10-04) carries the session date 2026-03-09, probably 3 September typed day first (found by the verification of 2026-10-09): it stays open until the club confirms the date; a guard on the forms is 79
+- 2026-11-13 (Ryan): (7) BATCH-000500's session is taken as 3 September 2026. Setting the batch's date waits for the Salesforce login (one record, on Ryan's go).
 
 ### 62. The names-dictionary audit runs only after an apply
 
@@ -498,6 +461,7 @@ Status: blocked-on-ryan
 Status: blocked-on-ryan
 
 - **11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria"** (same plan; `sf_dupes.py check --roster` reports them under (d)): two club accounts for what may be one club or two. A club decision first (one club or two, which account), then, if one, a move of the account's contacts and rows - not a merge of girls across clubs, which the tool never does
+- 2026-11-13 (Ryan): Otra Cosa's name list answers the club question. "Las Camelias" is the primary club, to be renamed "Las Camelias primaria", which matches the existing "Las Camelias Primaria" account (Salesforce ignores capitals). So the two accounts are one club; Las Camelias Secundaria is another. The account move is in the follow-up ticket, after the Salesforce login.
 
 ### 78. A guard in `tools/sf_backfill.py` against deleting back-fill contacts that carry live rows
 
@@ -596,6 +560,36 @@ Status: done 2026-09-28
 - Effort: 0.1
 - Who: Ryan + tooling
 - 2026-10-09: status from evidence elsewhere: the problem-report link (q443) was read on all five live forms on 2026-09-28 (`test/links_layout_test.py`), and the Monday e-mail goes to `STAFF_NOTIFY_EMAIL` (RUNBOOK "Working the ReviewQueue"); the day each was done is not recorded.
+
+### 5. Confirm Haske's region
+
+Status: done 2026-11-13
+
+- **Confirm Haske's region** (Partners tab says Africa on thin evidence; row is marked PLEASE CONFIRM)
+- Why: wrong region = wrong form
+- Effort: 0.05
+- Who: needs Ryan
+- 2026-11-13 (Ryan): Haske's region is Africa, confirmed. So is RAWSA/Tamkeen's, the other Partners-tab row marked to confirm.
+
+### 6a. Native-speaker check of the Odia labels
+
+Status: done 2026-11-13
+
+- **Native-speaker check of the Odia labels** (`tools/translations_or.json`, 63 strings) by a VIEWS mentor; corrections re-applied with `tools/add_language.py --code or --name Oriya --dict … --apply`
+- Why: the other languages came from Jotform's machine translation; Odia was written by us
+- Effort: 0.1 + partner time
+- Who: needs VIEWS
+- 2026-11-13 (Ryan): the labels are accepted as they are; no errors were reported.
+
+### 6b. Native-speaker check of the Hindi and Persian labels
+
+Status: done 2026-11-13
+
+- **Native-speaker check of the Hindi and Persian labels** on the Asia form (`tools/translations_hi.json`, `tools/translations_fa.json`, 52 strings each, written 2026-09-20 with a three-lens review); corrections re-applied with `tools/add_language.py --form 262383129464057 --code hi --name Hindi --dict … --apply` (Persian: `--code fa --name Persian`)
+- Why: written by us, like Odia; Persian readers may be Afghan (Dari)
+- Effort: 0.1 + partner time
+- Who: needs a Hindi and a Persian speaker
+- 2026-11-13 (Ryan): the labels are accepted as they are; no errors were reported.
 
 ### 7. `Jotform.gs`: UrlFetchApp wrapper
 
@@ -713,6 +707,22 @@ Status: done 2026-10-01
 - **The Contact duplicate rule alerts, and an alert refuses a girl created by code.** "First & Last & Account" is Allow + Alert + Report on create (read 2026-09-30). When a club has two girls with the same last name and similar first names (about 16 rosters), the attendance processor fails mid-batch: a Failed batch, part of the girls saved, the club's day blocked. It hit the live flow and the back-fill alike.
 - **Done 2026-10-01 11:26 UTC** on Ryan's go: Report only (deploy 0AfRP000002foFp0AI, read back, proven with two fictional test contacts that were deleted); the back-fill plans with `--dup-rule-ok`.
 - Left: the duplicate reports it now fills are worth a look once a month
+
+### 55. Monthly Report leftovers
+
+Status: dropped
+
+- **Monthly Report leftovers** (`docs/plans/2026-09-30-monthly-report-checkbox.md`): the new field is visible to System Administrator only (which other profiles?); an empty week is stored as 0, not blank; the production form sends a logged-out visitor to the **sandbox** login page (Ryan: leave it for now); the controller fails on an existing report when a save does not send three fields it reads back (the form always sends them).
+- Also: on 2026-09-30 12:42 UTC another administrator re-activated the former staff administrator's user - Ryan to ask whether that was intended
+- 2026-11-13 (Ryan): deleted; nothing more is wanted here.
+
+### 59. Region on the attendance dashboard
+
+Status: done 2026-11-18
+
+- **Region on the attendance dashboard.** Region is on the partner account (`Parent.Region__c`: Africa, Asia, North America, South America), not on clubs, and the report type `Accounts_Contacts_Attendance` cannot reach the partner's fields.
+- Either a new report type (base `Attendance__c` with lookups to the club, its partner and the partner's region), or a region on every Club account kept by the club tooling; then a Region dashboard filter (4 values) and charts by region
+- 2026-11-18 (#222): done by a formula field instead of either option: `Account.Partner_Region__c` (the partner's Region on a club) reaches all four report types, the standard Accounts one included, with no upkeep. The Region filter (4 values) covers all 17 components; deploy `0AfRP000002kRk10AE` on Ryan's go ([plan](plans/2026-11-18-sf-region-filter.md)). Charts by region were not asked for.
 
 ### 61. Possible duplicate girls in Salesforce
 
