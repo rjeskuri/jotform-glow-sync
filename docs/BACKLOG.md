@@ -372,6 +372,7 @@ Status: blocked-on-ryan
 - **Decided 2026-10-06 (Ryan)**: folder sharing stays as it is (hidden; administrators only), and girls' names are fine for anyone with Salesforce access, so (1) and (3) below are closed.
 - (1) share the two Attendance folders, with whom - closed 2026-10-06 with no change, reopened and decided 2026-10-09 (above); (2) record sharing, only if the folders are ever shared beyond administrators: the dashboard runs as Ryan, but a chart opens its report as the viewer, and club accounts are private (administrator-owned, no sharing rules), so a standard user sees few or no rows there; options: give leadership View All Data, or add a sharing rule on Club accounts (and check that the Contacts and `Attendance__c` rows follow it: the report type reads all three); (3) the test report's detail rows carry girls' names - closed, allowed inside Salesforce; (4) a daily scheduled refresh (Refresh > Schedule Refresh); (5) drop "(test)" from the names once it is the real one; (6) the Partner filter holds 49 of its 50 values by hand: a new or renamed partner needs an edit; (7) `BATCH-000500` (Niñas Emprendedoras y Empoderadas, submitted 2026-10-04) carries the session date 2026-03-09, probably 3 September typed day first (found by the verification of 2026-10-09): it stays open until the club confirms the date; a guard on the forms is 79
 - 2026-11-13 (Ryan): (7) BATCH-000500's session is taken as 3 September 2026. Setting the batch's date waits for the Salesforce login (one record, on Ryan's go).
+- 2026-11-18 (#216, on Ryan's 2026-11-13 answer): (7) done. `BATCH-000500` (`a1lRP000006KQSjYAO`) and its 14 `Attendance__c` rows redated from 2026-03-09 to 2026-09-03, one record per call, read back (the club had no other batch from 25 August to 12 September). (6) is still open.
 
 ### 62. The names-dictionary audit runs only after an apply
 
@@ -455,13 +456,6 @@ Status: blocked-on-ryan
 Status: blocked-on-ryan
 
 - **Days where Salesforce holds fewer rows than ticks** (same plan): Maridians 2026-09-17, 09-24 and 09-30 have 11-12 rows against 19-20 ticks - the fuller re-submissions were refused as same-day duplicates - and 11 back-fill sessions are held as `salesforce_has_different_count`. Needs a way to add the missing girls to a day that already has a batch (the processor keeps only the first per club and day): Ryan's decision on each
-
-### 77. 11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria"
-
-Status: blocked-on-ryan
-
-- **11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria"** (same plan; `sf_dupes.py check --roster` reports them under (d)): two club accounts for what may be one club or two. A club decision first (one club or two, which account), then, if one, a move of the account's contacts and rows - not a merge of girls across clubs, which the tool never does
-- 2026-11-13 (Ryan): Otra Cosa's name list answers the club question. "Las Camelias" is the primary club, to be renamed "Las Camelias primaria", which matches the existing "Las Camelias Primaria" account (Salesforce ignores capitals). So the two accounts are one club; Las Camelias Secundaria is another. The account move is in the follow-up ticket, after the Salesforce login.
 
 ### 78. A guard in `tools/sf_backfill.py` against deleting back-fill contacts that carry live rows
 
@@ -766,6 +760,14 @@ Status: done 2026-10-07
 - **The attendance processor's name match** (from `docs/plans/2026-10-07-sf-duplicate-girls.md`, "Not in this plan"): it compares a ticked name with the club's contacts exactly (capitals ignored), so any spacing difference makes a new contact, and it reads the club's contacts without `ORDER BY`, so with two copies of a girl the row goes to whichever comes first.
 - Fix: `normalizeSpace()` on both sides of the comparison and `ORDER BY CreatedDate` on the contacts. Vendor code (`AttendanceBatchProcessor`): its own plan, a check-only deploy, Ryan's go
 - **Done 2026-10-07** ([plan](plans/2026-10-07-processor-name-spacing.md)): names cleaned when parsed (format characters removed, any whitespace run one space), both sides compared clean, new girls stored clean, the club's contacts read oldest first; validated 33/33, deployed 04:38 UTC, proven rolled back
+
+### 77. 11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria"
+
+Status: done 2026-11-18
+
+- **11 girls with contacts in both "Las Camelias" and "Las Camelias Primaria"** (same plan; `sf_dupes.py check --roster` reports them under (d)): two club accounts for what may be one club or two. A club decision first (one club or two, which account), then, if one, a move of the account's contacts and rows - not a merge of girls across clubs, which the tool never does
+- 2026-11-13 (Ryan): Otra Cosa's name list answers the club question. "Las Camelias" is the primary club, to be renamed "Las Camelias primaria", which matches the existing "Las Camelias Primaria" account (Salesforce ignores capitals). So the two accounts are one club; Las Camelias Secundaria is another. The account move is in the follow-up ticket, after the Salesforce login.
+- 2026-11-18 (Ryan, #216): two clubs, two accounts, no move. Otra Cosa's "Las Camelias" (`001RP00000m2qV9YAI`) is now "Las Camelias primaria", the club that reports. The partner-less "Las Camelias Primaria" (`001RP00000nMZXfYAO`: 22 contacts, one batch of 2026-03-28, already flagged obsolete) was renamed "Las Camelias Primaria (marzo 2026)" so the two names no longer match, capitals ignored; Ryan chose this over moving its contacts. The 11 girls keep a contact in each account; the old one carries only the March session.
 
 ### 83. Scoped live-gate approval
 

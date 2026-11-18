@@ -2161,7 +2161,7 @@ is one monthly batch on the partner account, never per club (2026-10-19,
 - **When:** a club whose girls stopped coming; a whole region's clubs, after its form is disabled.
 - **Status:** built 2026-10-07 ([plan](plans/2026-10-06-clubs-off-jotform.md), C).
 - **Dry run:** `tools/deactivate_clubs.py --partner … --check-only`, then without `--apply`.
-- **Apply:** `--reason … --apply`, Ryan's go; then the dropdown refresh.
+- **Apply:** `--reason … --apply`, Ryan's go; then the dropdown refresh, and the club's Salesforce Account flagged `Obsolete_Record__c` (one record, Ryan's go) so the not-submitted lists leave it out ("Duplicate and obsolete records in Salesforce").
 - **Verify:** the template's sync dry run plans `~ retired roster …` from the day after.
 - **Rollback:** `--undo data/deactivate_clubs/<stamp>` (below).
 
@@ -2232,7 +2232,8 @@ What the tool does and guards:
   that do not use Jotform). The region's form: a `DISABLED` one is `skipped` by the runner
   and left as it is (its rosters, picker and rules frozen); an enabled one
   gets the retirements from its next sync.
-- **The way back.** `--undo data/deactivate_clubs/<stamp>` puts back exactly
+- **The way back.** In Salesforce, clear the club Account's `Obsolete_Record__c` (one record,
+  Ryan's go), or it stays off the not-submitted lists. Then `--undo data/deactivate_clubs/<stamp>` puts back exactly
   the rows `written.json` names - `status` and `removed_date` as they were -
   with the same shape (dry run, stale check, one batch, re-read, Audit
   `reactivateRows`). It refuses before the plan - the dry run too, nothing
@@ -3033,7 +3034,15 @@ ticket #85.
   `Attendance_Report_Viewer` permission set has Read on the four fields.
 - **The kept reports and dashboards:** flagged records are shown as before, with the two flags
   available as a filter on any report that lists Accounts or Contacts; nothing is excluded by
-  default.
+  default. The exception, since #216 (2026-11-18, Ryan; DECISIONS 2026-11-18): the four
+  not-submitted lists ("Clubs Not Submitting - Last 14 Days", "- Since 1 Sept", "- Last Week",
+  "Clubs With No Attendance Last Month") filter `Obsolete_Record__c` equals false. The filter leaves out of those four not-submitted lists
+  **every** Club account flagged obsolete, by hand or by the flagging batch: a club retired from the
+  Roster, and a club with no batch for six months (which is also a club not submitting, so it
+  leaves these lists once flagged). The batch's `flag` mode never takes a flag off, so a club that
+  comes back (`deactivate_clubs.py --undo`, a re-enrolment) stays off the four lists until its flag
+  is cleared by hand ("Deactivating a club", The way back). Its past attendance still counts
+  everywhere ([plan](plans/2026-11-18-ocn-cccyd-renames.md)).
 
 ### The fields and the rules
 
@@ -3956,7 +3965,9 @@ Farmington Municipal School District, HOLA and Holbrook Unified School District,
 `glow/sf_partners.csv` spells them. Since #209 (2026-11-05) the three not-submitted lists of the
 Jotform Attendance dashboard (`Clubs_Not_Submitting_Last_14_Days`,
 `Clubs_Not_Submitting_Since_1_Sept`, `Jotform_Clubs_No_Attendance_Last_Month`) hold the same
-nine-partner filter ("Attendance dashboard in Salesforce"). A new partner of that kind needs the
+nine-partner filter ("Attendance dashboard in Salesforce"). Since #216 (2026-11-18) all four not-submitted lists
+also leave out every Club account flagged `Obsolete_Record__c` ("Duplicate and obsolete records in
+Salesforce", the exception). A new partner of that kind needs the
 filter of all four lists edited by hand (a fresh retrieve, check-only, Ryan's go, deploy): one that reports monthly through
 Salesforce, or whose clubs stop using Jotform (the Partners tab's `jotform` set to `no`, "Clubs
 that do not use Jotform"). `Submissions_by_Club_and_Week` is unaffected: it shows only the clubs
