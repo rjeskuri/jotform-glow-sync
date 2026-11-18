@@ -35,11 +35,16 @@ service-account*.json
 
 # Claude Code per-machine files. settings.local.json must never hold secrets
 # (it did once — see docs/DECISIONS.md); the live-gate log records which
-# live-system commands the hook allowed or blocked on this machine.
+# live-system commands the hook allowed or blocked on this machine, and the
+# backup records which backups this checkout made today (glow/live_backups.py).
 .claude/settings.local.json
 .claude/*.local.json
 .claude/live_gate.log
+.claude/live_backups.log
 .claude/worktrees/
+# Guardrail candidates staged by an agent for Ryan to copy into .claude/ by hand
+# (protected_paths.sh keeps agents out of .claude/hooks and .claude/settings.json)
+.guardrails/
 
 # Per-checkout Python environment: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 # (no trailing slash: a worktree links .venv to the main checkout's)

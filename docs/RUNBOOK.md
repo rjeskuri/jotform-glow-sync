@@ -8,7 +8,9 @@ it, and through the forms, Salesforce). The forms and the sheet went live on
 
 How to read it. A procedure starts with the same short list, where it applies:
 **When** to use it, its **Status** (one line, with a link to its plan's Result),
-the **Dry run**, the **Apply** (a live write: Ryan's go, CLAUDE.md rule 1), how to
+the **Dry run**, the **Apply** (a live write, on the go of CLAUDE.md rule 1:
+since 2026-10-26 automatic for a listed write whose backup from today is on
+record, else Ryan's - what an Apply line's "Ryan's go" now means), how to
 **Verify** it and the **Rollback**. History - who decided what and when, how a
 rollout went - lives in the plan it belongs to (`docs/plans/`), linked by a
 **History** line. A finished one-time procedure keeps a short stub here; its
@@ -2510,14 +2512,14 @@ wording; forms built before 2026-09-28 get it once, from the menu
 - **When:** any change under `appsscript/`.
 - **Status:** the 2026-10-09 cleanup's changes (the Club Roster Form handlers' write order, the rebuild's YES/NO, the dropdown update under the lock, the consolidations) are in the repository, not deployed: they wait for Ryan's push. No new Google service, so no re-authorization is expected ([Result](plans/2026-10-09-repo-cleanup.md#result)).
 - **Dry run:** `make gs` (and `make check`).
-- **Apply:** `nvm use 18`, then `npm run clasp:push` at a quiet moment: Ryan, or Claude on his yes to the gate's prompt. Ryan can run the push with Claude through the user-only `/deploy-appsscript` skill.
+- **Apply:** Ryan picks the quiet moment before anyone runs the push; then `nvm use 18` and `npm run clasp:push`, run in the checkout (not in `appsscript/`: "Live gate (Claude Code)"). With everything under `appsscript/` committed, the push goes through automatically, logged and notified; anything uncommitted there and the gate asks, refused where no prompt can show. Ryan can run it himself, or with Claude through the user-only `/deploy-appsscript` skill.
 - **Verify:** a new Google service: authorize at once, then "Process any missed form responses" and read its preview.
 - **Rollback:** a push of the previously deployed `appsscript/` ("Rolling back `appsscript/`", below).
 
 ```bash
 make gs                 # parse, pinned services, calls that resolve (below)
 nvm use 18              # clasp 2.4.2: the npm scripts refuse any other Node
-npm run clasp:push      # gated: Claude asks, your answer is the go; or run it yourself
+npm run clasp:push      # automatic once appsscript/ is committed; or run it yourself
 ```
 
 `make gs` (`scripts/check_gs.js`) checks offline what would otherwise fail only live,
@@ -5711,10 +5713,25 @@ Three hooks in `.claude/hooks/`, wired in `.claude/settings.json`, guard what
 Claude runs and writes. The hooks are the source of truth (their header
 comments list every case); this is the summary.
 
-**`live_gate.sh`** (every Bash command) puts a command that can change a live
-system to Ryan as an approval prompt in the session (a PreToolUse `ask`); his
-answer is the go. Nothing pre-approves one and the hook never answers `allow`;
-since 2026-10-14 `GLOW_LIVE_OK` no longer opens the gate (DECISIONS 2026-10-14).
+**`live_gate.sh`** (every Bash command) decides each command that can change a
+live system (since 2026-10-26: ticket #146, DECISIONS 2026-10-26 "Backed-up live
+writes go through without a prompt"):
+
+- A live write whose backup from today is on record goes through automatically,
+  with no prompt (a PreToolUse `allow`). A headless or dispatched run, and a
+  subagent, gets the same automatic go on the same backups. Each automatic go is
+  logged `ALLOWED` and notified on Ryan's Mac.
+- Deletes and `--prune` still ask Ryan in the session, whatever the backups, and
+  are refused where no prompt can show.
+- A write without its backup from today asks Ryan in the session, the reason
+  naming the backup command to run. Where no prompt can show (a headless run, a
+  subagent), a write without its backup is refused with that command: the run's
+  needs-input.
+- Everything else live asks Ryan in the session (a PreToolUse `ask`; his answer
+  is the go), and is refused where no prompt can show: a command that is chained
+  or prefixed, a tool on no list, plan mode (a hook's `allow` has no effect
+  there). `GLOW_LIVE_OK` grants nothing (DECISIONS 2026-10-14).
+
 Live:
 
 - the tools' write flags: `--apply`, `--prune`, `--rehearse` (`sf_dupes.py`'s
@@ -5727,7 +5744,8 @@ Live:
   delete source`, `data create|update|delete|upsert|import`, `apex run`, the
   `force:` apex, source, mdapi and data commands, the REST API itself
   (`.salesforce.com/services/`), `sf api request graphql`, and `sf api request
-  rest` with a method other than GET, a body (`-b`) or a request file (`-f`);
+  rest` with a method other than GET, a body (`-b`), a request file (`-f`) or
+  `--flags-dir`;
 - the automatic sync's switches on GitHub: `gh variable|secret
   set|delete|remove`, `gh workflow enable|disable`, `gh workflow run` that
   applies (`apply` true, inputs from a file or as JSON), `gh run rerun` (a
@@ -5747,49 +5765,168 @@ that only mentions a flag passes: its first word is `grep`, `rg` (not `--pre`),
 `cat`, `head`, `tail`, `wc`, `ls`, or `git log|show|diff|grep|blame|status`,
 and it has no `;`, `&`, `|`, backtick, `$(`, `<(`, `>` or line break.
 
-Refused outright (a `deny`), whatever the mode:
+**The automatic go.** It needs one simple command (no `;`, `&`, `|`, backtick,
+`$(`, `<(`, `>`, `#` or line break), whose first word is `python3` (or a path
+ending `/python3`), `node`, `npm`, `npx`, `sf`, `sfdx`, `gh`, `curl` or `clasp`
+(never `env`, `sudo`, `nohup`, `time`, a shell's `-c` or a `VAR=value`), a tool
+or raw shape the hook lists by name, the backup of everything it writes, and the
+mode `default`, `acceptEdits`, `auto`, `dontAsk`, `bypassPermissions` or none.
+The backups, from today (the Mac's local date), and the command that makes each:
 
-- a self-approval: a command that sets `GLOW_LIVE_OK`, or writes a file the
-  next launch takes its environment from (`~/.zshrc` and the other shell
-  startup files, `.envrc`, `.env`: a redirect, `tee`, `sed -i`, `perl -i`), or
-  `launchctl setenv`;
-- a live command from a subagent (an `agent_id` in the hook's input): the main
-  session asks Ryan;
-- a live command in a session that cannot prompt: a permission mode other than
-  `default`, `acceptEdits`, `auto` or `plan` - `bypassPermissions`, `dontAsk`,
-  a missing or unknown one. Run it in an interactive session, or Ryan runs it
-  in his terminal.
+- Jotform - the form tools' `--apply` (`sync_attendance_form.py`,
+  `restore_conditions.py`, and in `tools/` `add_feedback_link`, `add_language`,
+  `add_session_notes`, `add_translations`, `auto_sync`, `disable_form`,
+  `fix_name_translations`, `fix_roster_order`, `rename_club`,
+  `restore_translations`, `switcher_flags`, `update_static_fields`),
+  `api.jotform.com`, `apply_changes=True`: a `jotform <form id>` record for each
+  form the command names (after `--form`, or in an API path `/form/<id>`), or
+  `jotform all`; a command naming no form needs `jotform all`. Made by
+  `python3 backup_forms.py --form <id>` (and every tool's own snapshot) or
+  `python3 backup_forms.py` (every form, then `jotform all`). `gh workflow run …
+  apply=true` and `gh run rerun` run the sync, which writes the forms: `jotform
+  all`.
+- the Sheet - `sheets_client.py import <Tab>`: `sheet <Tab>` (the tab matched
+  whole) or `sheet all`; the Sheets API writes, `rename_club.py` and
+  `auto_sync.py --synclog`: `sheet all`. Made by `python3 tools/sheets_client.py
+  export <Tab> data/<file>.csv` or `export-all data/<dir>`.
+- the sync's switches - `gh variable|secret set`, `gh workflow enable|disable`,
+  `gh api` or `api.github.com` on `actions/`: `github all`, made by `python3
+  tools/github_switches.py backup` (read-only: the variables with their values,
+  the secrets by name and date only, every workflow with its state, into
+  `backups/github/switches-<stamp>.json`).
+- Apps Script - `clasp push`: no record; `appsscript/` is tracked with nothing
+  changed or untracked under it, so the version before the push is in git.
+  Commit first. clasp pushes the project of the folder it runs in, so the push
+  runs from the Bash tool's working folder that holds it: `npx clasp push` or
+  `clasp push` in `appsscript/`, `npm run clasp:push` in the checkout, bare or
+  with `-f`/`--force`. From another folder (`drive-sync/`, another checkout),
+  or with `-P`, `--project`, `--rootDir` or another flag, it asks.
+- Salesforce, raw - `sf`/`sfdx` deploys, data writes, `apex run`, `sf api
+  request rest` writes, `.salesforce.com/services/`: no record; the command names a
+  path inside `data/sf_<topic>/` and `data/sf_<topic>/before/` holds a file
+  modified today (the plan's `before/` retrieve, or a lone `sf data query` or `sf
+  data export` saved there). A deploy (`sf project deploy start`, `sf deploy
+  metadata`) also needs an explicit source - `-d`/`--source-dir`,
+  `-m`/`--metadata` or `-x`/`--manifest` (joined too: `-d<path>`,
+  `--source-dir=<path>`): with none it deploys the project's tracked changes,
+  local deletions included (Ryan, 2026-11-06). `apex run` also needs
+  `--file` (`-f`) naming a file the hook reads: a regular file inside the
+  checkout, no link. A REST request (`sf api request rest`, `curl` to
+  `.salesforce.com/services/`) also needs the whole request on the command line:
+  the method (`-X`), the URL, the headers and an inline body (`--body '{…}'`, `-d
+  '{…}'`); its response may go to a file (`sf`'s `-S`, `curl`'s `-o`). An Apex
+  file holding a word that starts `delete`, `undelete`, `merge` or
+  `emptyRecycleBin`, and a deploy naming a folder with a
+  `destructiveChanges*.xml` below it, are deletes: they ask, and are refused
+  where no prompt can show.
+- Salesforce tools - `sf_backfill.py send`, `sf_dupes.py merge --rehearse`,
+  `sf_girls_present.py set`, `sf_partner_monthly.py` and `sf_report_folders.py
+  copy|move|undo` write their own rollback record (a `ledger.csv` row,
+  `merge_rollback.json`) before each write, so they need no other.
+  `sf_dupes.py`'s `--apply` asks: a merge deletes the losing record.
 
-A headless or dispatched run (`claude -p`) in one of the four prompting modes,
-`default` for one, gets the hook's `ask`, and Claude Code denies it, since no one
-can answer the prompt: a headless run never runs a live command, whatever its
-mode (DECISIONS 2026-10-14).
+Never automatic: `gh api` or `api.github.com` on `dispatches` or `graphql`;
+`auto_sync.py --apply-salesforce` (Salesforce accounts, no rollback record); a
+metadata (mdapi) deploy (`--metadata-dir`, `force:mdapi:deploy`), a
+source-tracked one (`sfdx force:source:push`, or a deploy with no `-d`, `-m` or
+`-x`), `force:apex:execute` and `apex run` with the Apex on standard input, whose changes the hook does not read;
+a request whose method, URL, headers, body or flags come from a file or standard
+input, which the hook does not read either (review 2 of PR #154: a request file, a
+composite body, a header file or a flags folder can hold a DELETE) - `sf`'s
+`--flags-dir` (a deploy's too), `sf api request graphql` (its `--body` is read
+from a file whenever one by that name exists), and a REST request (`sf api
+request rest`, `.salesforce.com/services/`) with `sf`'s `-f`/`--file`, `curl`'s
+`-T`/`--upload-file`, a `<`, a lone `-` (`--body -`, `--body=-`; `curl`'s `-o -`
+counts too) or an `@` in any word
+(`--body @file`, `-d @file`, `-H @file`, `-F f=@file`; an e-mail address in an
+inline body counts too), or sent by a `python3 -c` snippet; every `curl` with a
+config file (`-K`, `-K<file>`, `-sSK`, `--config`), whatever host it names or
+none (Ryan, 2026-11-06: the file sets the method, the URL and the data); any
+tool the hook does not list (the Drive photo mover, `upload_roster.py`,
+`deactivate_clubs.py`, `fix_module_values.py`, `sf_new_clubs.py`).
+
+The records are `.claude/live_backups.log` (gitignored, protected): one line per
+backup, `<YYYY-MM-DD HH:MM:SS>`, target, id and path separated by tabs, the path
+relative to the checkout, written only by `glow/live_backups.py` from the backup
+commands above. A record counts while its date is today and its path still
+exists inside the checkout (never an absolute path, never one that climbs out
+with `..`).
+
+**The notification.** Each automatic go is notified on the Mac that ran it: a
+macOS notification "GLOW live write auto-approved" with the target, the id and
+the command's first line, cut to 120 characters (`osascript`, run detached, the
+command passed only as an argument). The hook cannot reach a phone itself: Ryan's
+phone shows it only when Remote Control is on and relays the Mac's
+notifications. Without `osascript` (Linux, CI) there is no notification; the
+`ALLOWED` line stays.
+
+Refused outright (a `deny`), whatever the mode and the caller, a self-approval:
+a command that sets `GLOW_LIVE_OK`, writes a file the next launch takes its
+environment from (`~/.zshrc` and the other shell startup files, `.envrc`, `.env`:
+a redirect, `tee`, `sed -i`, `perl -i`, or a `cp`, `mv`, `ln`, `install`, `rsync`
+or `ditto` onto one, not a copy from one), or `launchctl setenv`; the same writes
+to `~/.curlrc` (or `$CURL_HOME/.curlrc`), which every `curl` reads its method
+and options from (Ryan, 2026-11-06); and a forged
+backup - `.claude/live_backups.log` written, copied, moved, linked, touched or
+truncated by hand (any spelling of its path; a redirect whose target is the
+records, or one the hook cannot read: a variable, a substitution, a glob), its
+writer `glow/live_backups.py` imported or called by hand, or a Salesforce plan's
+`before/` made by hand (`touch` under it, `cp`/`mv`/`rsync`/`ditto`/`ln`/`install`
+onto it, a redirect or `tee` into it from anything but a query). The refusal
+says what to run instead. Reading the records (their output or errors redirected
+elsewhere, such as into a file under `data/`), copying from a `before/`, and a query,
+an export or a retrieve saved into one, each alone (`sf data query … >
+data/sf_<topic>/before/<file>`, `sf data export … --output-dir`, `sf project
+retrieve start … --target-dir`), pass.
+
+Where no prompt can show - a subagent (an `agent_id` in the hook's input), or a
+permission mode other than `default`, `acceptEdits`, `auto` or `plan`
+(`bypassPermissions`, `dontAsk`, a missing or unknown one) - every live command
+that is not a backed write is refused with its reason: run it in an interactive
+session, or Ryan runs it in his terminal. A headless or dispatched run (`claude
+-p`) in a prompting mode, `default` for one, that gets the hook's `ask` is denied
+by Claude Code, since no one can answer it; it ends as needs-input.
 
 Every decision on a live command is appended to `.claude/live_gate.log`
-(gitignored) with its mode: `ASKED` for the hook's `ask`, `BLOCKED` for its
-refusal (also when no decision could be built; the hook then exits 2). `ASKED`
-means a prompt was shown only in an interactive session: a headless run's ask is
-logged `ASKED` too, though Claude Code denied it and nothing ran.
-`.claude/settings.json` backs the hook: `ask` rules for the live families (`npm
-run clasp*`, `npx clasp`, `gh variable|secret set|delete`, `gh workflow run|enable|disable`, `gh
-run rerun`, `sf project deploy start|quick|validate|resume`, `sf apex run`, `sf
-data create|update|delete|upsert|import`), and `onFailure: block`, so a hook
-that fails stops the command. `Bash(gh api:*)` is in `allow` (the harness reads
-with it): any other `gh api` call runs without a prompt, while the hook's `ask`
-still prompts on `actions/`, `dispatches` and `graphql`.
+(gitignored) with its mode: `ALLOWED` for an automatic go (with its target and
+the backup it used), `ASKED` for the hook's `ask`, `BLOCKED` for its refusal
+(also when no decision could be built; the hook then exits 2). `ASKED` means a
+prompt was shown only in an interactive session: a headless run's ask is logged
+`ASKED` too, though Claude Code denied it and nothing ran.
+`.claude/settings.json` backs the hook with `ask` rules on the deletes only (`sf
+data delete`, `sf project delete source`, `gh variable|secret delete|remove`):
+a hook's `allow` does not get past an `ask` rule, so the families with an
+automatic go have none. In `dontAsk` only allow-listed commands run, so the
+backups a headless run takes have `allow` rules: `backup_forms.py`, `sheets_client.py
+export` and `export-all`, `github_switches.py backup` and `sf project retrieve
+start`. It also has `onFailure: block`, so a hook that fails
+stops the command. `Bash(gh api:*)` is in `allow` (the harness reads with it):
+any other `gh api` call runs without a prompt, while the hook still decides on
+`actions/`, `dispatches` and `graphql`. The auto-mode classifier is Claude Code's
+own and may still ask about a command the hook let through.
 
 The hook is a seatbelt, not the go: it reads the command's text, so a write
 through another program, a flag assembled at run time, and the session's
 connector tools (Salesforce through claude.ai) are not seen - it guards against
-mistakes, not intent. Before answering yes: read the dry run and check the
-backup exists. Running commands yourself in a terminal is never affected.
+mistakes, not intent. It checks that a backup of today is on record, not that
+the backup is complete or restorable; and a raw `sf` write is backed by the plan
+folder it names, not by what else it deploys. Known gaps, accepted at #146's final
+review (2026-11-06): curl also reads `$XDG_CONFIG_HOME/curlrc` (no dot), which the
+gate does not protect; a copy onto a startup file or `~/.curlrc` followed by a
+redirect, a `#` comment or a line break, or one copying a file named `.curlrc`
+into a folder (`cp x/.curlrc ~/`), gets no decision; and the colon spellings of sf
+commands (`sf project:deploy:start`, `sf data:delete:record`) are not seen, so the
+spaced spelling is the one to use. Before answering yes to a prompt:
+read the dry run and check the backup exists. Running commands yourself in a
+terminal is never affected.
 
 **`protected_paths.sh`** (every Edit and Write) blocks an edit of anything under
 `data/`, `backups/` or `credentials/` (its `README.md` and
 `config.example.json` excepted), a `.env` or `.env.*` file (not `.env.example`),
 `appsscript/Regions.gs` (hand-kept data since 2026-10-09, edited by Ryan; the
 hook's message still calls it generated), and `.claude/settings.json`,
-`.claude/settings.local.json`, `.claude/live_gate.log` and `.claude/hooks/` -
+`.claude/settings.local.json`, `.claude/live_gate.log`,
+`.claude/live_backups.log` (the backup records) and `.claude/hooks/` -
 the project's and the user's (`~/.claude/`) - in any checkout (the main one, a
 worktree, a sibling clone), matched on path components, ignoring case, with
 symbolic links resolved. **`secret_scan.sh`** runs `scripts/check_secrets.py` on

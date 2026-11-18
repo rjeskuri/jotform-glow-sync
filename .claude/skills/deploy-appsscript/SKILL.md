@@ -29,9 +29,11 @@ e-mail and the GLOW menu: a bad push stops them. Detail lives in RUNBOOK "Apps S
    `git status --short -- appsscript` must print nothing; note `git rev-parse --short HEAD`.
 5. **A quiet moment.** Ask Ryan: no other rollout running (a sync apply, a Salesforce deploy), no
    Club Roster Form response or problem report expected in the next minutes.
-6. **Push.** In Ryan's shell: `nvm use 18` (the script refuses any other Node; clasp 2.4.2), then
-   `npm run clasp:push`. Ryan runs it, or Claude does: the hook puts the push to Ryan as an
-   approval prompt, and his yes is the go (a session that cannot prompt is refused).
+6. **Push.** Ryan's word on step 5 comes before running it. `nvm use 18` (the script refuses any
+   other Node; clasp 2.4.2), then `npm run clasp:push` in the checkout's root (the gate checks the
+   folder it runs in), by Ryan or Claude. With step 4's checkout
+   committed, the push goes through automatically, logged and notified; anything uncommitted under
+   `appsscript/` and the gate asks (refused where no prompt can show).
 7. **Authorize.** Ryan opens the sheet and runs a GLOW menu item (Show roster summary); if Google
    asks for authorization, he accepts at once.
 8. **Missed responses.** GLOW → Google Forms → Process any missed form responses, and read the
