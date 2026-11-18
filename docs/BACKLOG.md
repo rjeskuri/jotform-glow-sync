@@ -392,13 +392,6 @@ Status: open
 - **Attendance rate on the dashboard ("% of the maximum attendance possible")** - the line chart Ryan asked for on 2026-10-02, left out because Salesforce has no enrolled count (`docs/plans/2026-10-02-attendance-dashboard.md`, "Later"). Ryan's definition: a session's maximum is the girls active on that club's roster in the sheet **on the session date** (the Roster's `added_date` / `removed_date`; removed girls drop out from their removal date), only for sessions held; **nothing more on the forms**.
 - Needs: two number fields on `Attendance_Batch__c` (girls present = its attendance rows; girls enrolled), a small repo tool that fills them from the roster export (club code → account id from `data/sf_prep_2026-09-30/created_accounts*.csv`, dry run, then `--apply` on Ryan's go, idempotent), a sessions report type with the summary formula SUM(present) / SUM(enrolled), then a line by week and a number for last month. Keeping it current without a hand run needs Salesforce access from GitHub Actions or a nightly Salesforce flow
 
-### 59. Region on the attendance dashboard
-
-Status: open
-
-- **Region on the attendance dashboard.** Region is on the partner account (`Parent.Region__c`: Africa, Asia, North America, South America), not on clubs, and the report type `Accounts_Contacts_Attendance` cannot reach the partner's fields.
-- Either a new report type (base `Attendance__c` with lookups to the club, its partner and the partner's region), or a region on every Club account kept by the club tooling; then a Region dashboard filter (4 values) and charts by region
-
 ### 60. Attendance dashboard leftovers
 
 Status: blocked-on-ryan
@@ -713,6 +706,14 @@ Status: done 2026-10-01
 - **The Contact duplicate rule alerts, and an alert refuses a girl created by code.** "First & Last & Account" is Allow + Alert + Report on create (read 2026-09-30). When a club has two girls with the same last name and similar first names (about 16 rosters), the attendance processor fails mid-batch: a Failed batch, part of the girls saved, the club's day blocked. It hit the live flow and the back-fill alike.
 - **Done 2026-10-01 11:26 UTC** on Ryan's go: Report only (deploy 0AfRP000002foFp0AI, read back, proven with two fictional test contacts that were deleted); the back-fill plans with `--dup-rule-ok`.
 - Left: the duplicate reports it now fills are worth a look once a month
+
+### 59. Region on the attendance dashboard
+
+Status: done 2026-11-18
+
+- **Region on the attendance dashboard.** Region is on the partner account (`Parent.Region__c`: Africa, Asia, North America, South America), not on clubs, and the report type `Accounts_Contacts_Attendance` cannot reach the partner's fields.
+- Either a new report type (base `Attendance__c` with lookups to the club, its partner and the partner's region), or a region on every Club account kept by the club tooling; then a Region dashboard filter (4 values) and charts by region
+- 2026-11-18 (#222): done by a formula field instead of either option: `Account.Partner_Region__c` (the partner's Region on a club) reaches all four report types, the standard Accounts one included, with no upkeep. The Region filter (4 values) covers all 17 components; deploy `0AfRP000002kRk10AE` on Ryan's go ([plan](plans/2026-11-18-sf-region-filter.md)). Charts by region were not asked for.
 
 ### 61. Possible duplicate girls in Salesforce
 

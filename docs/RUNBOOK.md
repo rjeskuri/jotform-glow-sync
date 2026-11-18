@@ -3452,6 +3452,14 @@ API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describ
   typed in exactly (Salesforce allows 50 values per filter): the partners that have clubs, less
   the six U.S partners since #209, with the partner OMID Foundation (Asia, `001RP000002nJZiYAM`)
   added by #212 (until #212 it held 43, until #209 49).
+- The dashboard's **Region** filter (since #222, 2026-11-18) covers every component too: Africa,
+  Asia, North America, South America. It reads the formula field `Account.Partner_Region__c` (the
+  partner's `Region__c` on a club, its own on a partner account), in each report type's terms:
+  `Account.Partner_Region__c` (the standard Accounts reports), `Account$Partner_Region__c`
+  (`Accounts_Contacts_Attendance`), `Attendance_Batch__c$Account__c.Partner_Region__c` (the two
+  batch report types). Nothing to keep: a new club follows its partner. A club whose partner has
+  no Region shows under no region. A new region value is added to the filter by hand
+  ([plan](plans/2026-11-18-sf-region-filter.md)).
 - Since #209 (Ryan, 2026-11-05: the U.S partners are inactive) the Jotform Attendance dashboard's
   Partner filter offers none of the six U.S partners: Angelo Patri School (`001RP000002nJZUYA2`),
   Detroit Public Schools (`001RP000002nJZNYA2`), Ewa Makai Middle School (`001RP00000SL2ebYAD`),
