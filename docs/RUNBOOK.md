@@ -3387,9 +3387,21 @@ from data Salesforce already has ([plan and result](plans/2026-10-02-attendance-
 Its label lost "(test)" with the 2026-10-09 Access deploy (below); the DeveloperName keeps it.
 
 What it shows - the headline tiles (below), weekly and monthly charts, last month by partner and
-by module, the clubs with no attendance or not submitting, the blank submissions - and how to
+by module, the clubs with no attendance or not submitting, and since #231 (2026-11-18) a table of
+girls present by club and date in place of the blank-submissions tile - and how to
 read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
 month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
+
+**Girls present by club and date** (#231, 2026-11-18, Ryan: "replace the blank response report with
+the Attendance by club by date report"): a full-width table from "Attendance By Club By Date"
+(`Attendance_By_Club_By_Week_Wdl`, `00ORP000007uBRN2A2`): club, session day (newest first), girls
+present, last 90 days; it follows the Partner and Region filters, and the report behind it has
+Region, Partner and Club filters any viewer can set (#226). The report is grouped by the club
+account (`Account$Name`) and the attendance date by day; a dashboard table names those groupings
+by their Analytics API names (`Account.Name`, `Attendance__c.Attendance_Date__c`), not the report
+type's `$` names, and needs a sort. The "Blank Submissions" report stays in the Attendance folder;
+only the tile is gone, and the two tiles beside it are 6 columns wide
+([plan](plans/2026-11-18-sf-dash-club-date-table.md)).
 
 **The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
 deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
