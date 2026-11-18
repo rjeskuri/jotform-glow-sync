@@ -3537,7 +3537,9 @@ sharing stays as it is"):
   - Read on the 21 fields that the reports in both folders show, filter or group, the pilot
     reports included, and since 2026-10-21 (#59) the three new fields
     `Attendance_Batch__c.Partner_Girls__c`, `Attendance__c.Contact_Key__c` and
-    `Attendance__c.Has_Row__c`. The list is in the plan; the derivation is
+    `Attendance__c.Has_Row__c`, and since 2026-11-18 (#222) `Account.Partner_Region__c`, the
+    Region filter's field (also readable in the System Administrator profile, the dashboard's
+    running user). The list is in the plan; the derivation is
     `public_2026-10-09/evidence/`.
   A filter on a field the viewer cannot read is dropped silently, or the report fails "Invalid
   Report". Every per-girl report filters on `Creator__c`: without it, the totals would include

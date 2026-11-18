@@ -4,6 +4,7 @@ author: Claude (ticket #222, on Ryan's request of 2026-11-13)
 status: done      # ticket #222; deploy 0AfRP000002kRk10AE on 2026-11-18 UTC on Ryan's go
 done: 2026-11-18
 created: 2026-11-18
+backlog: 59
 intent: Ryan, 2026-11-13 - "go ahead and add a region filter to the dashboard" (pick Asia, every component shows Asia only)
 ---
 
@@ -73,4 +74,10 @@ Each Salesforce call with the VPN off; the deploy on Ryan's go.
   624/624, North America 19/19, South America 257/257, Africa 935/932: the 3 more are batches on
   partner accounts without a parent (partner-reported counts), which the field gives their own
   region, as intended.
-- The filter in Lightning: Ryan's check (pick Asia: the totals follow the 95 Asia clubs).
+- One region checked end to end (2026-11-18, ~08:20 UTC): "Attendance By Club By Date" run
+  through the Analytics API with `Account.Partner_Region__c` equals Asia, the column the
+  dashboard's Region filter uses on that report type, gave 89 clubs and 8,546 attendance rows
+  over the last 90 days; SOQL on `Attendance__c` (`Account__r.Partner_Region__c = 'Asia'`,
+  `LAST_N_DAYS:90`) gave the same 89 clubs and 8,546 rows. A filtered dashboard refresh through
+  the API returned no data (its filter ids changed with #231's redeploy), so the click in
+  Lightning is Ryan's to see.
