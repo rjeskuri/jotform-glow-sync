@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-18 | A Region filter on the Jotform Attendance dashboard, through Account.Partner_Region__c | done 2026-11-18 | 59 | [2026-11-18-sf-region-filter.md](2026-11-18-sf-region-filter.md) |
 | 2026-11-18 | Year 2 elective "Understanding our World" on the attendance forms | done 2026-11-18 |  | [2026-11-18-elective-understanding-our-world.md](2026-11-18-elective-understanding-our-world.md) |
 | 2026-11-06 | OMID Foundation as an Asia partner - Partners tab, the Jotform Attendance dashboard's Partner filter, the partner map | done 2026-11-06 |  | [2026-11-06-sf-omid-partner.md](2026-11-06-sf-omid-partner.md) |
 | 2026-11-05 | The six U.S partners off every dashboard and report; the not-submitted lists without the monthly partners | done 2026-11-06 |  | [2026-11-05-sf-us-partners.md](2026-11-05-sf-us-partners.md) |
