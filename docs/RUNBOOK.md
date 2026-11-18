@@ -3033,7 +3033,12 @@ ticket #85.
   `Attendance_Report_Viewer` permission set has Read on the four fields.
 - **The kept reports and dashboards:** flagged records are shown as before, with the two flags
   available as a filter on any report that lists Accounts or Contacts; nothing is excluded by
-  default.
+  default. The exception, since #216 (2026-11-18, Ryan): the Jotform Attendance dashboard's three
+  club lists ("Clubs Not Submitting - Last 14 Days", "- Since 1 Sept", "Clubs With No Attendance
+  Last Month") filter `Obsolete_Record__c` equals false, so a retired club is not listed as not
+  submitting. A club retired from the Roster ("Deactivating a club") gets the flag by hand (one
+  record, on Ryan's go) until the flagging batch next runs. Its past attendance still counts
+  ([plan](plans/2026-11-18-ocn-cccyd-renames.md)).
 
 ### The fields and the rules
 
