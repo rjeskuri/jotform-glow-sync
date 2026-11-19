@@ -1,7 +1,8 @@
 ---
 title: The corrections failed as "Duplicate" before 2026-10-24 re-sent, so the processor merges their missing girls
 author: Claude (with Ryan's request of 2026-10-22)
-status: in-progress      # ticket #153: group A re-sent 2026-10-26; group B (2 clubs, 12 batches) held for GLOW
+status: done      # ticket #153: group A re-sent 2026-10-26; group B and 9 later corrections 2026-11-19
+done: 2026-11-19
 created: 2026-10-24
 intent: none - Ryan's request of 2026-10-22 (ticket #109, epic #93): bring in the 12 girls the 2026-10-22 trace found missing, once the processor accepts a correction (#108)
 ---
@@ -123,4 +124,14 @@ batches were never touched.
   `module_differs: 3`, `no_names: 1` and `original_not_mergeable: 1`. It still lists
   `to re-send: 12 batches, 117 girls to add, 30 new contacts, 2 clubs`: that is group B, held.
   `tools/sf_girls_present.py check`: 1120 Jotform Success batches, differ 0, without a value 0 -> OK.
-- **Open:** group B waits for GLOW's answer. The plan is `done` once B is either sent or set aside.
+- **Group B sent, 2026-11-19** (Ryan's ruling of 2026-11-13: "Use your judgement for 153 group
+  B"):
+  - The first copy, BATCH-001853, failed. A release by another team on 2026-10-26 had replaced
+    the processor with one that does not merge (#238).
+  - BATCH-001853 was deleted on Ryan's go and closed `--removed`. The processor was restored at
+    14:39 UTC (#238).
+  - Then `resend --apply --vpn-off` sent 21 copies, BATCH-001854 to BATCH-001874, each read back
+    ok. That was group B's 12 (Swopnajyoti through another failed copy of the same submission)
+    and 9 corrections that failed while the processor was replaced.
+  - In all, 160 attendance rows were added, with 23 new contacts, in 8 clubs.
+  - `sf_girls_present.py check` afterwards: differ 0.
