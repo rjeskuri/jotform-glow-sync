@@ -1,7 +1,7 @@
 ---
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
-status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 puts them on the dashboard
+status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 puts them on the dashboard: built 2026-11-20, deploy on Ryan's go ("Task #103: the timing on the dashboard")
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
@@ -437,3 +437,142 @@ it.
       rows equal 765.
     The delay report's blank-partner group ("-") holds pilot-era batches dated February and March
     2026, with delays up to 209 days. Its whole-period maximum comes from them.
+
+## Task #103: the timing on the dashboard
+
+Ticket #103 puts three of #102's reports on the "Jotform Attendance" dashboard
+(`Attendance/Jotform_Attendance_test`): four components and the timing in its "How to read this
+dashboard" box. What each component shows and the rollback: RUNBOOK "Attendance dashboard in
+Salesforce", Submission timing. Ryan's answers of 2026-10-26 on the ticket shape it: the outline's
+metric of late submissions becomes the average days from session to submission, last month (no
+threshold anywhere, DECISIONS 2026-10-23); `Submission_Delay_by_Partner_by_Month` gains a floor,
+session dates from 2026-09-01, deployed with the dashboard; the check-only decides between `build/`
+and `build_sibling/`.
+
+### Build (2026-11-20, offline)
+
+In `data/sf_session_timing_2026-11-19/` (owner only, never committed), written in the session's
+scratch folder and copied there, since the protected-paths hook refuses an agent's writes under
+`data/`:
+- `dashboard_before/`: the fresh retrieve of `Dashboard:Attendance/Jotform_Attendance_test`, taken
+  2026-11-19 after #222 (the Region filter) and #231 (the club-by-date table). It differs from
+  #231's read-back `data/sf_dash_swap_2026-11-18/after2/` in the How-to box alone: two of its
+  sentences were edited since ("Filter by region or partner above", and "and region" dropped from
+  "Not here yet"). The build starts from it, so the edit stays; the retrieve of 2026-10-26 in
+  `data/sf_session_timing_2026-10-26/` predates #209, #222 and #231 and is never used.
+- `reports_before/`: the fresh retrieve (2026-11-20, read only) of the three reports the
+  components read, `Clubs_Not_Submitting_Last_Week`, `Late_Submissions_Last_Month` and
+  `Submission_Delay_by_Partner_by_Month`, and the report type `Attendance_Totals`; each equals its
+  latest read-back (#157's `after/`, #216's `lw_after/`, #222's `after/`).
+- `build/` is a copy of `dashboard_before/` and of the two changed reports in `reports_before/`,
+  edited, with `dashboard_before/`'s `sfdx-project.json`:
+  - the dashboard `Jotform_Attendance_test`: four components in two rows below the club-by-date
+    table (rows 78-97, two 6-column halves each): the metric "Clubs not submitting" / "last week"
+    on `Clubs_Not_Submitting_Last_Week` (a copy of the 14-day metric, record count), the metric
+    "Average days from session to submission" / "last month" on `Late_Submissions_Last_Month` (the
+    average of `Submission_Delay_Days__c`, one decimal), the FlexTable "Clubs not submitting last
+    week, by partner (open for the club list)" on `Clubs_Not_Submitting_Last_Week` (a copy of the
+    14-day table: partner and count, the most first) and a `BarGrouped` chart on
+    `Submission_Delay_by_Partner_by_Month` (the average delay, grouped by partner then
+    `Session_Month__c`, partners A to Z, 16 rows high). Each carries the Partner and Region filter
+    columns of its report type, as the dashboard's other components do (`PARENT.NAME` and
+    `Account.Partner_Region__c` on Accounts; `Attendance_Batch__c$Account__c.Parent` and
+    `Attendance_Batch__c$Account__c.Partner_Region__c` on `Attendance_Totals`). The "How to read
+    this dashboard" box moves to row 98, 13 rows high, with five bullets added before "Numbers are
+    as of the last refresh": last week (Sunday to Saturday), submitted at (the batch's Created
+    Date) and the days counted to its UTC day, the back-fill and the three partners' monthly counts
+    without either, the average and the chart, and no threshold.
+  - `Late_Submissions_Last_Month`: `<aggregateTypes>Average</aggregateTypes>` on the delay column
+    (a metric shows only a summary its report defines), and its description says so.
+  - `Submission_Delay_by_Partner_by_Month`: `<startDate>2026-09-01</startDate>` in its time frame
+    on `Attendance_Date__c` (as `Girls_Attended_by_Month`), beside the `N_MONTHS_AGO:11` criterion,
+    and its description says so.
+  - `Clubs_Not_Submitting_Last_Week` is read as it is live and is not in `build/`.
+- `build_sibling/`, the layout for a component-count refusal: the same two reports; the dashboard
+  `Attendance_Submissions` ("Attendance Submissions", new, in the Attendance folder) with the four
+  components in the same two rows from the top, the same Partner and Region filters (copied from
+  `dashboard_before/`), the same running user, no owner (whoever deploys it owns it), and its own
+  "How to read this dashboard" box with the timing bullets; and `Jotform_Attendance_test` with one
+  bullet added to its box naming "Attendance Submissions", in this folder. The bullet does not link
+  it: the new dashboard's Id exists only after the deploy.
+
+Offline checks, 2026-11-20: every XML file parses (`xmllint --noout`); `build/`'s dashboard differs
+from `dashboard_before/` by the four components, the box's place and its five bullets alone; each
+report differs from `reports_before/` by the lines above alone; both report descriptions are within
+255 characters. Not proved offline, settled by the check-only: the component count (Salesforce's
+limit is 20 or 25: the build has 22), a metric's `Average` on a formula field, the `BarGrouped`
+component with two `groupingColumn` entries, and `startDate` beside a relative criterion on the same
+date.
+
+### Rollout (live; the deploy on Ryan's go, in the main session)
+
+All folders in `data/sf_session_timing_2026-11-19/`; VPN off for every step; through the CLI login
+`glow`; only counts and partner names reach the ticket, the conversation or this plan.
+1. Retrieve fresh, the day of the deploy, the dashboard `Dashboard:Attendance/Jotform_Attendance_test`
+   and the three reports into `before/` (a file from today there is what the live gate reads).
+   Compare the dashboard with `dashboard_before/` and the reports with `reports_before/`: a
+   difference means someone changed it since, so rebuild `build/` (and `build_sibling/`) from the
+   fresh retrieve and say so on the ticket before going on.
+2. Check-only of `build/`: `cd data/sf_session_timing_2026-11-19/build/ && sf project deploy start
+   --dry-run -o glow -d force-app`. If it refuses `build/` for the number of components, the same from within
+   `build_sibling/`; any other refusal is fixed in the build and checked again. The check-only's id
+   and the layout it passed go on the ticket.
+3. Ryan's go in the conversation (the live gate puts the deploy to him as an approval prompt; his
+   answer is the go).
+4. Deploy: the same command minus `--dry-run`, from the folder that passed; its id and time (UTC)
+   go into Result.
+5. Read back: retrieve the dashboard (and `Attendance_Submissions` with the sibling) and the two
+   reports into `after/` and compare with `build/` (or `build_sibling/`): equal apart from
+   Salesforce's normalisation (`expandOthers`, escaped apostrophes, default attributes).
+6. Refresh: the PUT of RUNBOOK "Attendance dashboard in Salesforce", Refreshing through the API
+   (`analytics/dashboards/01ZRP00000BE2TR2A1`, or the sibling's Id), on Ryan's go, unfiltered and
+   then with `?filter1=<option id>` for one partner, a minute apart.
+7. Each new component against its report's total and its SOQL check (RUNBOOK "Submission timing in
+   Salesforce", The timing reports), under All and under one partner's filter (the check with
+   `Parent.Name` or `Account__r.Parent.Name` equal to that partner): both not-submitting
+   components equal the report's grand total and the SOQL count; the average metric equals the
+   report's average and the average of the SOQL rows; each partner-month bar equals the report's
+   average and the SOQL average with the 2026-09-01 floor. A difference stops here, its cause on
+   the ticket.
+8. The ticket's definition of done ticked; Result written; the RUNBOOK's check for
+   `Submission_Delay_by_Partner_by_Month` gains its floor; the Status lines say deployed.
+
+### Rollback
+
+VPN off, in `data/sf_session_timing_2026-11-19/`. Retrieve the dashboard
+`Attendance/Jotform_Attendance_test` fresh and compare it with #103's read-back `after/`. If it
+differs beyond Salesforce's normalisation, someone changed it since: stop, and build the rollback
+from that fresh retrieve instead, taking out of it only the four components and the box's timing
+bullets. Equal: check-only first, then on Ryan's go redeploy only the dashboard, from
+`dashboard_before/`: within `dashboard_before/`, `sf project deploy start --dry-run -o glow -m
+"Dashboard:Attendance/Jotform_Attendance_test"`, then the same command minus `--dry-run`. Never
+`-d force-app` within `build/` nor an older package (DECISIONS 2026-10-16). Retrieve it again and
+compare it with `dashboard_before/`. #102's four reports stay, the two #103 edited included: the
+Average summary and the 2026-09-01 floor are kept, since nothing else changes when the dashboard
+stops reading them; taking either out is an edit of a fresh retrieve of that report, on Ryan's go.
+With the sibling dashboard "Attendance Submissions" live (`build_sibling/`), it is retired with
+the rollback: moved to Decommissioned by hand in Lightning, keeping its Id (the archive rule,
+DECISIONS 2026-10-21), never deleted. Revert this task's RUNBOOK change with it.
+
+### Risks
+
+- **The live leadership dashboard**: upper-level staff read it; a component that fails to render
+  or reads wrong is seen at once. The read-back and the checks of Rollout steps 5-7 come before
+  the ticket closes, and the rollback restores `dashboard_before/`.
+- **The component limit**: 22 components may be over Salesforce's limit (20 or 25, not confirmed
+  offline); then `build_sibling/` puts the four on "Attendance Submissions", one click further for
+  readers.
+- **Last week is the running user's week**: the dashboard runs as Ryan (en_US: Sunday to
+  Saturday); a viewer who opens the report by hand sees the week of their own locale, which can
+  start on another day.
+- **The Partner filter on a blank partner**: a club without a partner shows as "-" under All and
+  under no partner; the floor removes the pilot-era "-" bar from the chart, not a later club whose
+  partner is blank.
+- **A change since the retrieve**: the box was edited by hand between #231's read-back and
+  2026-11-19; another edit before the deploy is caught by Rollout step 1, and the build is redone.
+
+### Result
+
+- 2026-11-20: built offline (Build, above) from the fresh retrieves of 2026-11-19 (the dashboard)
+  and 2026-11-20 (the three reports and the report type, read only, VPN off). Nothing validated or
+  deployed; Rollout steps 1-8 wait for Ryan's go.

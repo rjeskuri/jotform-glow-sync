@@ -972,3 +972,11 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Until Ryan pushes the script and runs `installTriggers` once, the menu is still the only way. After that the window is up to an hour, during which the Club Roster Form can still offer a retired club; the menu closes it at once.
   - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
   - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".
+
+### 2026-10-26 — The dashboard's timing: an average-delay metric, and the delay report from 1 September 2026 (#103)
+
+- The Jotform Attendance dashboard shows, from #102's reports, the clubs not submitting last week (a metric and a table by partner, `Clubs_Not_Submitting_Last_Week`), the average days from session to submission of last month (a metric, the average of `Submission_Delay_Days__c` in `Late_Submissions_Last_Month`, which gains an Average summary for it) and the average delay by partner and session month (a bar chart, `Submission_Delay_by_Partner_by_Month`).
+- `Submission_Delay_by_Partner_by_Month` keeps only session dates from 2026-09-01, like the other attendance reports, deployed with the dashboard.
+- **Why:** Ryan, 2026-10-26, on the ticket: the outline's metric of late submissions "over N days" assumed a threshold that DECISIONS 2026-10-23 dropped, so it becomes the average, and a click opens every delay, largest first; the floor drops the February-March 2026 pilot batches, which showed as a blank-partner bar with delays of months. A dashboard component cannot narrow the report to last month, so the chart shows a bar per session month.
+- **Rejected:** a count of every submission of last month (it says nothing about timing); a threshold of any kind (2026-10-23).
+- **Consequences:** if the check-only refuses 22 components, the four go on a new dashboard "Attendance Submissions" in the Attendance folder, named from the Jotform Attendance box (the check-only decides, Ryan 2026-10-26). The rollback of #103 redeploys only the dashboard; the two report edits stay. Plan: `docs/plans/2026-10-23-submission-timing.md`, "Task #103".
