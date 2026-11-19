@@ -2,6 +2,7 @@
 
 Text edits, each with an assert. Never prints XML: D5's filter values are staff names.
 Usage: python3 -I make_build.py <topic folder holding before/>
+       python3 -I make_build.py <topic folder> fix1   (fix1/: the field alone, from the fresh retrieve after/)
 """
 import pathlib
 import re
@@ -9,6 +10,24 @@ import shutil
 import sys
 
 HERE = pathlib.Path(sys.argv[1]).resolve()
+if sys.argv[2:] == ['fix1']:
+    # The first deploy compared `<= ADDMONTHS(Period__c, 1) + 14`: inside another formula the submission date
+    # (formula `CreatedDate`) is evaluated as its date-time, and a date-time on the 15th is after the 15th at
+    # 00:00 GMT, so a report filed on the 15th read Late. `< ... + 15` is the same rule for a date and for the
+    # date-time (before the 16th at 00:00 GMT is on or before the 15th, the GMT date the field shows).
+    rel = 'objects/DHIS2__c/fields/Submitted_On_Time__c.field-meta.xml'
+    out = HERE / 'fix1'
+    if out.exists():
+        shutil.rmtree(out)
+    (out / 'force-app/main/default' / rel).parent.mkdir(parents=True)
+    (out / 'sfdx-project.json').write_text((HERE / 'sfdx-project.json').read_text())
+    text = (HERE / 'after' / rel).read_text()
+    old = 'Monthly_Report_submission_date__c &lt;= ADDMONTHS(Period__c, 1) + 14,'
+    assert text.count(old) == 1, 'fix1: the live comparison'
+    text = text.replace(old, 'Monthly_Report_submission_date__c &lt; ADDMONTHS(Period__c, 1) + 15,')
+    (out / 'force-app/main/default' / rel).write_text(text)
+    print('built fix1: 1 file')
+    sys.exit(0)
 SRC = HERE / 'before'
 OUT = HERE / 'build'
 DST = OUT / 'force-app' / 'main' / 'default'
