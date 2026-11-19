@@ -47,9 +47,19 @@ rule unchanged, the counts (0 groups, 0 cross-type, 0 sets), and is not `done` w
 batch check (step 8) is pending. Every part a test reads is swept for what would
 contradict the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied
 where it is said, without a time limit) or stopping a save in other words (a halt, pop-up, message,
-prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way),
-a softener on the proof, the check-only, the go or the read-back. Counts and ids only: no figure
-from the org is pinned.
+prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way)
+or its attendance no longer counting, a softener on the proof, the check-only, the go or the read-back.
+Counts and ids only: no figure from the org is pinned.
+
+The one exception (#216; Ryan, 2026-11-18: retired clubs must not "show up or impact reporting in
+salesforce"; DECISIONS 2026-11-18 amends 2026-10-21): the four not-submitted lists
+(`Clubs_Not_Submitting_Last_14_Days`, `_Since_1_Sept`, `_Last_Week`,
+`Jotform_Clubs_No_Attendance_Last_Month`) carry a locked filter `Account.Obsolete_Record__c` equals false
+(deploys 0AfRP000002kRqT0AU and 0AfRP000002kSo90AE). The sweep reads it only in a clause that names
+those lists and the obsolete flag, leaves out rather than deletes or merges, and names no duplicate, no
+other report, dashboard or list and no Contact; every other report and dashboard still shows flagged
+records and their attendance still counts. The RUNBOOK section and the 2026-11-18 entry state the
+exception with that scope, and the 2026-10-21 entry gets a dated bullet pointing at it.
 
 DuplicateAccountGroups: glow.salesforce.duplicate_account_groups(accounts), the Python side of the
 Account matching rule for the read-back and the monthly check - the groups of Accounts the rule
@@ -128,8 +138,12 @@ class DuplicateRuleDocs(unittest.TestCase):
                          r"[\"”]|\b(duplicate|obsolete)s?\s+(?!rules?\b)(\w+\s+){0,2}?(records?|accounts?|contacts?|"
                          r"girls?|partners?|clubs?|rows?)\b")
     REMOVAL = re.compile(r"(?i)\bdelet\w*|\bmerg\w*|\bpurg\w*|\beras\w*|\bwip(e|es|ed|ing)\b|\bdestroy\w*|"
-                         r"\brecycle bin\b|\bremov\w*|\bexclud\w*|\bleft out\b|\bleaves? out\b|\bhid(e|es|den|ing)\b|"
-                         r"\bdrop\w*|\bfilter(ed|s)? out\b|\bomit\w*|\bclean\w* (up|out)\b")
+                         r"\brecycle bin\b|\bremov\w*|\bexclud\w*|\bleft\s+(\w+\s+){0,2}?out\b|\bleav(e|es|ing)\s+(\w+\s+){0,2}?out\b|"
+                         r"\bhid(e|es|den|ing)\b|\bdrop\w*|\bfilter(ed|s)? out\b|\bomit\w*|\bclean\w* (up|out)\b|"
+                         r"\b(kept|keeps?|keeping)\s+(\w+\s+){0,2}?(out|off)\b")
+    # what never becomes the exception below: a record deleted, merged or destroyed (only a list may leave one out)
+    DESTRUCTIVE = re.compile(r"(?i)delet\w*|merg\w*|purg\w*|eras\w*|wip(e|es|ed|ing)|destroy\w*|recycle bin|remov\w*|"
+                             r"drop\w*|clean\w* (up|out)")
     # removing a field or a flag itself is not removing a record
     FIELD_OR_FLAG = re.compile(r"(?i)\b(delet|remov)\w*\s+(the\s+|an?\s+|its\s+|their\s+|both\s+|all\s+|four\s+|new\s+|"
                                r"each\s+|every\s+)*(\w+\s+){0,3}?(fields?|flags?|checkbox(es)?)\b|"
@@ -153,8 +167,40 @@ class DuplicateRuleDocs(unittest.TestCase):
     # flagged records kept out of the reports, said in other words (the phrases are the hiding: a negation
     # before them does not make them a denial, but for "filtered out" and "= false")
     HIDDEN = re.compile(r"(?i)\bdoes not appear\b|\bnot appear\b|\bkeeps? only\b|\bonly clean\b|=\s*false\b|"
-                        r"\bunflagged only\b|\bfiltered out\b")
-    HIDDEN_DENIABLE = re.compile(r"(?i)\bfiltered out\b|=\s*false\b")
+                        r"\bequals?\s+false\b|!=\s*true\b|\bnot equal to\s+true\b|\bunflagged only\b|\bfiltered out\b")
+    HIDDEN_DENIABLE = re.compile(r"(?i)\bfiltered out\b|=\s*false\b|\bequals?\s+false\b|!=\s*true\b|\bnot equal to\s+true\b")
+    # a flagged record's attendance said to stop counting
+    COUNTED = re.compile(r"(?i)\battendance\b|\bbatch(es)?\b|\btotals?\b|\bGirls Attended\b")
+    UNCOUNTED = re.compile(r"(?i)\b(no longer|stops?|stopped|ceases?|ceased)\s+(to\s+)?(be\s+)?count\w*|"
+                           r"\b(not|never)\s+(be\s+|been\s+|get\s+)?count(s|ed|ing)?\b|\b(does|do|did)\s*n['’]t\s+count\b|"
+                           r"\bout of (the |every |all |its |their )?(totals?|counts?|figures?)\b")
+    # the one exception (Ryan, 2026-11-18, #216; DECISIONS 2026-11-18): the four not-submitted lists leave out the Club
+    # accounts flagged `Obsolete_Record__c`. It holds only in a clause that names those lists (the phrase or a report's
+    # API name or label) and the obsolete flag, says no record is deleted or merged, and names no duplicate, no other
+    # flag, no other report, dashboard, total or list, and no Contact, girl or partner
+    LIST_API = ("Clubs_Not_Submitting_Last_14_Days", "Clubs_Not_Submitting_Since_1_Sept", "Clubs_Not_Submitting_Last_Week",
+                "Jotform_Clubs_No_Attendance_Last_Month")
+    FOUR_LISTS = (r"Last_14_Days|Last 14 Days", r"Since_1_Sept|Since 1 Sept", r"Last_Week|Last Week",
+                  r"No_Attendance_Last_Month|No Attendance Last Month")
+    NOT_SUBMITTED = re.compile(r"(?i)\bnot[- ]submitt(ed|ing) lists?\b|\blists? of (the )?clubs not submitting\b|"
+                               + "|".join(LIST_API) + r"|(?-i:Clubs Not Submitting -|Clubs With No Attendance Last Month)")
+    # the lists' names read as no denial ("the not-submitted lists leave out ..." is not "not ... leave out"), nor does
+    # "no attendance" or "no batch" (what makes a club obsolete)
+    LIST_WORDS = re.compile(r"(?i)\bnot[- ]submitt\w*|\bClubs Not Submitting\b|\bNo Attendance Last Month\b|"
+                            r"\b(no|without)\s+(an?\s+)?(attendance|batch(es)?|Monthly Reports?|parent|partner|submission)\b")
+    OBSOLETE = re.compile(r"Obsolete_Record__c|(?i:\bobsolete\b)|[\"“]Obsolete Record[\"”]")
+    DUPLICATE = re.compile(r"(?i)duplicat\w*")
+    # "flagged" is the obsolete flag only when it says so ("flagged obsolete", "obsolete-flagged")
+    BARE_FLAGGED = re.compile(r"(?i)(?<!obsolete-)(?<!obsolete )\bflagged\b(?!\s+(`?\w*Obsolete_Record__c|obsolete\b|[\"“]Obsolete))")
+    DEPLOY_PAREN = re.compile(r"\([^()]*\b0Af\w{15}\b[^()]*\)")       # a deploy's bookkeeping: "(deploy 0Af…, three reports)"
+    OTHER_SCOPE = re.compile(r"(?i)\b(reports?|dashboards?(?!['’]s)|totals?|tiles?|charts?|matri(x|ces)|figures?|headlines?)\b|"
+                             r"\b(other|every|any|each)\s+lists?\b|\ball\s+(the\s+)?lists\b|\bother\s+\w+\s+lists?\b")
+    API_NAME = re.compile(r"\b[A-Z]\w*_\w+")
+    NOT_A_CLUB = re.compile(r"(?i)\b(contacts?|girls?|participants?|partners?|households?|staff|mentors?|coordinators?)\b")
+    EXCEPTION_DAY = "2026-11-18"
+    EXCEPTION_DEPLOYS = ("0AfRP000002kRqT0AU", "0AfRP000002kSo90AE")
+    STILL_COUNTS = (r"(?i)\bstill counts?\b|\bstill (be |being )?counted\b|\bkeeps? counting\b|\bcounts? (still|as before|"
+                    r"everywhere)\b")
     # the one merge a clause may name: one girl's duplicate contacts (tools/sf_dupes.py), in a clause that also
     # says flagged records are not merged by it
     GIRL_WORDS = re.compile(r"(?i)\b(contacts?|girls?)\b")
@@ -428,33 +474,71 @@ class DuplicateRuleDocs(unittest.TestCase):
             break
         return out
 
+    def obsolete_lists_exception(self, s, word):
+        """Whether the hiding word `word` of clause `s` is the one documented exception (DECISIONS 2026-11-18): the
+        four not-submitted lists leave out the Club accounts flagged `Obsolete_Record__c`. The clause names those
+        lists and the obsolete flag; the word leaves out, never deletes or merges; the clause names no duplicate, no
+        bare "flagged" (either flag), no other report, dashboard, total or list (a report's API name included; a
+        deploy's bookkeeping in brackets aside) and no Contact, girl or partner. The section's own title in quotes
+        names neither flag."""
+        if self.DESTRUCTIVE.match(word):
+            return False
+        s = re.sub(self.Q + re.escape(self.SECTION[3:]) + self.QE, " ", s)
+        if not (self.NOT_SUBMITTED.search(s) and self.OBSOLETE.search(s)):
+            return False
+        if self.DUPLICATE.search(s) or self.BARE_FLAGGED.search(s) or self.NOT_A_CLUB.search(s):
+            return False
+        scope = self.DEPLOY_PAREN.sub(" ", s)
+        if self.OTHER_SCOPE.search(scope):
+            return False
+        return all(n in self.LIST_API or n.endswith("__c") for n in self.API_NAME.findall(scope))
+
     def removes_flagged(self, s):
         """A flagged, duplicate or obsolete record deleted, merged, hidden or excluded in clause `s`, not denied
-        where it is said. A field or the flag itself may be removed. The one merge a clause may name is one
-        girl's duplicate contacts (`tools/sf_dupes.py`), in a clause that also says flagged records are not
-        merged by it. The hiding phrases (HIDDEN) count even after a negation, but for "filtered out" and
-        "= false"."""
+        where it is said (the not-submitted lists' names and "no attendance" are no denial). A field or the flag
+        itself may be removed. The one merge a clause may name is one girl's duplicate contacts (`tools/sf_dupes.py`),
+        in a clause that also says flagged records are not merged by it. The hiding phrases (HIDDEN) count even
+        after a negation, but for "filtered out" and "= false" / "equals false". The one exception: the four
+        not-submitted lists leaving out obsolete Club accounts, said with its scope (obsolete_lists_exception)."""
         if not self.FLAGGED.search(s):
             return []
-        for m in self.HIDDEN.finditer(s):
-            if self.HIDDEN_DENIABLE.fullmatch(m.group(0)) and self.locally_denied(s, m):
+        plain = self.LIST_WORDS.sub(" lists ", s)
+        for m in self.HIDDEN.finditer(plain):
+            if self.HIDDEN_DENIABLE.fullmatch(m.group(0)) and self.locally_denied(plain, m):
+                continue
+            if self.obsolete_lists_exception(s, m.group(0)):
                 continue
             return [f"keeps flagged records out of the reports ({m.group(0)!r}): {s[:160]!r}"]
-        scrubbed = self.FIELD_OR_FLAG.sub(" ", s)
+        scrubbed = self.FIELD_OR_FLAG.sub(" ", plain)
         for m in self.REMOVAL.finditer(scrubbed):
             if self.locally_denied(scrubbed, m):
                 continue
             if m.group(0).lower().startswith("merg") and self.GIRL_WORDS.search(scrubbed) \
                     and self.NOT_FOR_FLAG.search(scrubbed):
                 continue
+            if self.obsolete_lists_exception(s, m.group(0)):
+                continue
             return [f"removes, merges or hides flagged records ({m.group(0)!r}): {s[:160]!r}"]
+        return []
+
+    def uncounts_flagged(self, s):
+        """A flagged, duplicate or obsolete record's attendance said to stop counting in clause `s`, not denied where
+        it is said ("never stops counting")."""
+        if not (self.FLAGGED.search(s) and self.COUNTED.search(s)):
+            return []
+        plain = self.LIST_WORDS.sub(" lists ", s)
+        for m in self.UNCOUNTED.finditer(plain):
+            if not self.locally_denied(plain, m):
+                return [f"stops counting a flagged record's attendance ({m.group(0)!r}): {s[:160]!r}"]
         return []
 
     def contradictions(self, text, rollback=False):
         """The clauses of `text` that contradict the rules: the rule's action is Alert or Block (not denied
         where it is said, or denied with a time limit), or it stops a save said in other words; a flagged,
-        duplicate or obsolete record deleted, merged, hidden or kept out of the reports (removes_flagged); a
-        softener not itself denied. With `rollback`, "no rollback" is one."""
+        duplicate or obsolete record deleted, merged, hidden or kept out of the reports (removes_flagged) but for
+        the four not-submitted lists leaving out obsolete Club accounts, said with that scope; a flagged record's
+        attendance no longer counting (uncounts_flagged); a softener not itself denied. With `rollback`, "no
+        rollback" is one."""
         out = []
         girls = re.compile(self.Q + re.escape(self.GIRLS) + self.QE)
         for s in self.clauses(text, ".;:?!"):
@@ -462,6 +546,7 @@ class DuplicateRuleDocs(unittest.TestCase):
             out += self.alert_or_block(kept)
             out += self.stops_a_save(kept)
             out += self.removes_flagged(kept)
+            out += self.uncounts_flagged(kept)
             for m in self.SOFTENER.finditer(s):
                 if not self.locally_denied(s, m):
                     out.append(f"softens a rule ({m.group(0)!r}): {s[:160]!r}")
@@ -476,7 +561,12 @@ class DuplicateRuleDocs(unittest.TestCase):
                                     "Block and never stops, halts, refuses or prompts on a save - name Alert or Block "
                                     "only to deny them or as the cost, `an alert refuses a record created by code`; a "
                                     "flagged record is never deleted, merged, hidden, filtered out or kept out of the "
-                                    "reports; the proof, the check-only, the go and the read-back are never optional): "
+                                    "reports and its attendance always counts, with one exception (DECISIONS "
+                                    "2026-11-18): the four not-submitted lists leave out Club accounts flagged "
+                                    "`Obsolete_Record__c`, said in a clause that itself names the not-submitted lists "
+                                    "(or their API names) and the obsolete flag and nothing else - no duplicate, no bare "
+                                    "\"flagged\", no other report, dashboard or list, no Contact; the proof, the "
+                                    "check-only, the go and the read-back are never optional): "
                                     + "; ".join(found))
 
     # --- reading the docs ---------------------------------------------------------------------------------
@@ -714,6 +804,138 @@ class DuplicateRuleDocs(unittest.TestCase):
                         f"{where}: say `tools/sf_dupes.py` still merges one girl's duplicate contacts by its own key and "
                         "never merges a record for being flagged, in one sentence")
         self.assertNoContradiction(part, where)
+
+    # --- the one exception: the not-submitted lists leave out obsolete clubs (#216, Ryan, 2026-11-18) ------------
+
+    def left_out_paragraph(self):
+        """The RUNBOOK's `**Who is left out**` paragraph: what the not-submitted lists leave out, and how."""
+        m = re.search(r"(?ms)^\*\*Who is left out\*\*.*?(?=\n[ \t]*\n|\Z)", read(self.RUNBOOK))
+        self.assertTrue(m, "docs/RUNBOOK.md: no `**Who is left out**` paragraph (what the not-submitted lists leave out)")
+        return m.group(0)
+
+    def test_the_sweep_allows_only_the_obsolete_exception_on_the_not_submitted_lists(self):
+        """DECISIONS 2026-11-18 amends 2026-10-21 for four lists only: flagged records stay in every report and
+        dashboard and their attendance keeps counting, but the four not-submitted lists may leave out the Club
+        accounts flagged `Obsolete_Record__c`. The sweep reads the exception only in a clause that names those lists
+        and the obsolete flag; anything wider - no list named, another report, the duplicate flag, a bare "flagged",
+        a Contact or partner, a deletion or a merge, attendance that stops counting - stays a contradiction, and the
+        lists' own names ("not-submitted", "Clubs Not Submitting") or "no batch" are no denial. Fictional sentences,
+        one dimension varied at a time."""
+        allowed = (
+            "The four not-submitted lists leave out every Club account flagged obsolete.",
+            "`Clubs_Not_Submitting_Last_Week` filters `Account.Obsolete_Record__c` equals false.",
+            "`Jotform_Clubs_No_Attendance_Last_Month` excludes the Club accounts flagged obsolete.",
+            "An obsolete club does not appear on the not-submitted lists.",
+            "The not-submitted lists (\"Clubs Not Submitting - Last 14 Days\", \"Clubs With No Attendance Last Month\") "
+            "hide obsolete clubs (deploy `0AfRP000002kRqT0AU`, three reports).",
+            "Flagged records are shown in every report and dashboard, with the flags as a filter.",
+            "No flagged record is excluded by default.",
+            "No report filters `Duplicate_Record__c` equals false.",
+            "An obsolete club's past attendance still counts in every total.",
+        )
+        forbidden = (
+            "Every report leaves out the Club accounts flagged obsolete.",                   # no list named
+            "That leaves out every Club account flagged obsolete.",                          # a back-reference only
+            "The four lists leave out every Club account flagged obsolete.",                 # which lists?
+            "The Club Attendance report filters `Obsolete_Record__c` equals false.",         # another report
+            "The not-submitted lists and every other report leave out obsolete clubs.",      # a wider scope
+            "The not-submitted lists and the dashboard's charts hide obsolete clubs.",
+            "The not-submitted lists and `Submissions_by_Club_and_Week` leave out obsolete clubs.",
+            "The not-submitted lists leave out every Club account flagged duplicate.",       # the other flag
+            "The not-submitted lists filter `Duplicate_Record__c` equals false.",
+            "The not-submitted lists leave out every flagged club.",                         # either flag
+            "The not-submitted lists leave out every flagged club and every obsolete one.",
+            "The not-submitted lists leave out the Contacts flagged obsolete.",              # not a club
+            "Obsolete partners are left out of the not-submitted lists.",
+            "The not-submitted lists delete obsolete clubs.",                                # a deletion
+            "Obsolete clubs on the not-submitted lists are merged.",                         # a merge
+            "Obsolete clubs are kept out of the reports.",                                   # said in other words
+            "Clubs with no batch are hidden once flagged obsolete.",                         # "no batch" is no denial
+            "An obsolete club's attendance no longer counts.",                               # attendance
+            "Flagged clubs' batches are not counted in the totals.",
+        )
+        for s in allowed:
+            self.assertEqual(self.contradictions(s), [], f"the sweep reads {s!r} as a contradiction: it is the rule, or "
+                                                         "its one exception said with its scope")
+        for s in forbidden:
+            self.assertNotEqual(self.contradictions(s), [], f"the sweep lets {s!r} through: only the four not-submitted "
+                                                            "lists may leave out Club accounts flagged obsolete, said in "
+                                                            "the clause that names them")
+
+    def test_the_runbook_states_the_obsolete_exception_and_its_scope(self):
+        """The RUNBOOK section names the exception where it says what the kept reports show: the four not-submitted
+        lists, each named, with the obsolete flag in one clause; that is the exception (the only one) to "nothing is
+        excluded by default"; the club's past attendance still counts. No clause of the section, nor of the "Who is
+        left out" paragraph on those lists, leaves flagged records out beyond that."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        part = self.section()
+        self.assertTrue(self.said(part, *self.FOUR_LISTS, self.OBSOLETE.pattern, negated=True),
+                        f"{where}: name the four not-submitted lists (Last 14 Days, Since 1 Sept, Last Week, No Attendance "
+                        "Last Month; by label or API name) and `Obsolete_Record__c` in one clause: the lists that leave out "
+                        "the Club accounts flagged obsolete")
+        self.assertTrue(self.said(part, r"(?i)\bexceptions?\b|\bonly\b", self.NOT_SUBMITTED.pattern, ends=".", negated=True),
+                        f"{where}: say in one sentence that the not-submitted lists are the exception (the only one) to "
+                        "flagged records being shown with nothing excluded by default")
+        self.assertTrue(self.said(part, r"(?i)\battendance\b", self.STILL_COUNTS),
+                        f"{where}: say a club flagged obsolete keeps its past attendance counted (\"its past attendance "
+                        "still counts\"), in one sentence")
+        self.assertNoContradiction(part, where)
+        self.assertNoContradiction(self.left_out_paragraph(), "docs/RUNBOOK.md, the `**Who is left out**` paragraph")
+
+    def test_a_decision_records_the_obsolete_exception_and_amends_2026_10_21(self):
+        """Ryan's decision of 2026-11-18 is a dated section at the end of DECISIONS: the four not-submitted lists, each
+        named, leave out the Club accounts flagged `Obsolete_Record__c` (the two deploys); it amends 2026-10-21 for
+        those lists only - every other report and dashboard still shows flagged records, and their attendance still
+        counts - and the 2026-10-21 entry gets a dated bullet pointing at it (the file's header) that names the lists
+        and the obsolete flag. Nothing in the entry leaves flagged records out beyond that."""
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+
+        def day(entry):
+            m = re.match(r"### (\d{4}-\d\d-\d\d) ", entry)
+            return m.group(1) if m else ""
+
+        old = [x for x in entries if day(x) == "2026-10-21" and self.TICKET.search(x) and re.search(r"(?i)\bobsolete\b", x)]
+        self.assertTrue(old, "docs/DECISIONS.md: the 2026-10-21 entry on ticket #84 (the definitions) is missing")
+        new = [x for x in entries if day(x) >= self.EXCEPTION_DAY and "Obsolete_Record__c" in x
+               and self.NOT_SUBMITTED.search(self.norm(x))]
+        self.assertTrue(new, f"docs/DECISIONS.md: no dated entry `### {self.EXCEPTION_DAY} — …` (or later) naming "
+                             "`Obsolete_Record__c` and the not-submitted lists (Ryan's exception of 2026-11-18)")
+        e = new[0]
+        where = f"docs/DECISIONS.md {day(e)}"
+        self.assertGreater(entries.index(e), entries.index(old[0]),
+                           f"{where}: the entry comes after the 2026-10-21 one (the file is in date order)")
+        self.assertTrue(self.said(e, *self.FOUR_LISTS, self.OBSOLETE.pattern, negated=True),
+                        f"{where}: name the four not-submitted lists (`Clubs_Not_Submitting_Last_14_Days`, `_Since_1_Sept`, "
+                        "`_Last_Week`, `Jotform_Clubs_No_Attendance_Last_Month`) and `Obsolete_Record__c` in one clause")
+        for deploy in self.EXCEPTION_DEPLOYS:
+            self.assertIn(deploy, e, f"{where}: record the deploy `{deploy}` (the lists' filter is live)")
+        self.assertTrue(self.said(e, r"\bRyan\b", self.EXCEPTION_DAY, negated=True),
+                        f"{where}: attribute the decision to Ryan, {self.EXCEPTION_DAY}, in one sentence")
+        self.assertTrue(self.said(e, r"2026-10-21", r"(?i)\bamend\w*|\bnarrow\w*|\bexceptions?\b", negated=True),
+                        f"{where}: say the entry amends the 2026-10-21 decision (flagged records shown, nothing excluded), "
+                        "in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\b(every|all|any|each|no)\s+other\b", r"(?i)\breports?\b", r"(?i)\bdashboards?\b",
+                                  r"(?i)\bflag\w*|\bobsolete\b", negated=True),
+                        f"{where}: say the exception is those lists only: every other report and dashboard still shows "
+                        "flagged records, in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\battendance\b", self.STILL_COUNTS),
+                        f"{where}: say a club flagged obsolete keeps its past attendance counted, in one sentence")
+        rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
+        self.assertNoContradiction(rest, where)
+        # the 2026-10-21 entry: a dated bullet pointing at the new entry, naming the lists and the obsolete flag, so its
+        # "nothing is excluded by default" reads with the exception (its sweep: test_a_decision_records_glows_definitions)
+        pointer_rx = r"(?m)^\s*- " + re.escape(day(e)) + r"[:,].*(?:\n(?!\s*- |\n|#).*)*"
+        pointers = re.findall(pointer_rx, old[0])
+        self.assertTrue(pointers, f"docs/DECISIONS.md 2026-10-21: the entry gets a dated bullet `- {day(e)}: …` pointing at "
+                                  f"the {day(e)} entry (the file's header: the earlier decision gets a dated bullet "
+                                  "pointing at the one that amends it)")
+        joined = " ".join(flat(b) for b in pointers)
+        self.assertRegex(joined, r"(?i)\bsee\b|\bentry\b|\bamend\w*|\bbelow\b",
+                         f"docs/DECISIONS.md 2026-10-21: the `- {day(e)}:` bullet points at the new entry (\"see the {day(e)} "
+                         "entry\", \"amended\")")
+        self.assertTrue(self.said(joined, self.NOT_SUBMITTED.pattern, self.OBSOLETE.pattern, negated=True),
+                        f"docs/DECISIONS.md 2026-10-21: the `- {day(e)}:` bullet names the not-submitted lists and the "
+                        "obsolete flag in one clause")
 
     # --- the proof and the cross-type pairs: the docs as deployed (Ryan, 2026-10-22) ------------------------
 
@@ -1544,6 +1766,645 @@ class DuplicateAccountGroups(unittest.TestCase):
         self.assertEqual(self.groups([b, d]), [], "a Club and an account without a record type are not twins")
         self.assertEqual(self.groups([account(6, "Blue Herons", parent=P1), d]), [],
                          "a partnered account and a partner-less one are not twins")
+
+
+def sf18(body):
+    """The 18-character form of a 15-character Salesforce id: the id plus Salesforce's case-safe suffix, one
+    character per 5-character chunk (bit i set when the chunk's i-th character is a capital; 0-25 → A-Z, 26-31
+    → 0-5). `sf apex run` and SOQL give the 18-character form; an id typed by hand fails its suffix."""
+    assert re.fullmatch(r"[A-Za-z0-9]{15}", body), f"not a 15-character id: {body!r}"
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    return body + "".join(alphabet[sum(1 << i for i, c in enumerate(body[k:k + 5]) if c.isupper())]
+                          for k in (0, 5, 10))
+
+
+# the function against ids Salesforce gave: the #84 deploy and its check-only (DuplicateRuleDocs)
+assert sf18(DuplicateRuleDocs.DEPLOY_ID[:15]) == DuplicateRuleDocs.DEPLOY_ID
+assert sf18(DuplicateRuleDocs.CHECK_ONLY_ID[:15]) == DuplicateRuleDocs.CHECK_ONLY_ID
+
+
+class RecordFlagBatchDocs(unittest.TestCase):
+    """Ticket #85 (Ryan, 2026-10-23: 1a, 2a and the Contact workflow guard): the docs side of the flagging
+    batch `RecordFlagBatch` and its script writer `tools/sf_record_flags.py`. The RUNBOOK section records the
+    run - its date and time (`HH:MM UTC`), each object's run with its own 18-character AsyncApexJob id (`707…`,
+    Salesforce's case-safe suffix checked), a count for each flag on each object equal to the plan's `## Result`
+    (which carries, per object and flag, the dry run's count and the run's count, which agree, step 4's count
+    of the flags set by hand outside the criteria (0 included), and the read-back's count, which is exactly
+    the dry run's plus that hand-set count: a `flag` run never unsets a flag; the plan then `status: done`), the rollback by `clear` mode on the
+    `- **Rollback:**` line (anywhere on it, after #84's rollback of the rules) and how to run it again - and a
+    plan `docs/plans/<date>-sf-record-flag-batch.md` carries the Rollout in order, each step with its command
+    line: the check-only (naming the test class), the deploy (by the check-only's id or with the test class),
+    the guard's three counts (the SOQL naming the npe01 e-mail fields, the phone fields and the Volunteers
+    signup field), a count of the flags set by hand (`clear` would wipe them too), the dry run (the script
+    writer's command lines, `--sobject Account` and `--sobject Contact`, and `sf apex run`), Ryan's
+    confirmation of the counts, the run (Account, then the guard again - the SOQL or the tool's Contact
+    command - then Contact, each with its full command line) and the read-back (`Duplicate_Record__c`,
+    `Obsolete_Record__c`, `COUNT()`); its Rollback is `clear` mode, says `clear` wipes the hand-set flags too
+    and names the saved ids (`flagged.csv`). Structure and consistency, never particular numbers: the run
+    itself waits for Ryan's go, so the RUNBOOK test stays red until the section records a run that happened
+    and the plan's Result agrees with it.
+
+    After the review of PR #133 (Ryan, 2026-10-24, option a): the RUNBOOK section and the plan say that a
+    `flag` run only sets a flag and never unsets one, that a flag comes off only through `clear`, and (the
+    section) that a stale flag stays until a `clear` and a `flag` run, with the old "sets each flag to what the
+    criteria say" gone or qualified; each Rollout step that runs `sf apex run` carries the read-only
+    AsyncApexJob query that finds the run's job id (`ApexClass.Name = 'RecordFlagBatch'`, newest first),
+    since a one-statement script prints none; and the section states the sharp-s divergence (the batch keys
+    a name with toLowerCase, `duplicate_account_groups` with casefold: Straße and STRASSE are two names to one
+    side and one to the other)."""
+
+    longMessage = False
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    SECTION = DuplicateRuleDocs.SECTION
+    PLANS = os.path.join(REPO, "docs", "plans", "*-sf-record-flag-batch.md")
+    TICKET = re.compile(r"(?<![\w#])#85\b")
+    FIRST_RUN_DAY = "2026-10-23"             # the day the work started: no run is earlier
+    DATE = re.compile(r"\b(\d{4}-\d\d-\d\d)\b")
+    TIME = r"\b(?:[01]\d|2[0-3]):[0-5]\d UTC\b"
+    NUMBER = r"\b\d{1,3}(?:,\d{3})*\b"
+    SCRIPT = r"sf_record_flags[._]py"        # norm() joins the dot: `sf_record_flags_py` in a clause
+    BATCH = (rf"RecordFlagBatch|{SCRIPT}|(?i:\bflagging batch\b|\bflag(?:ging)? run\b|\bthe batch\b|"
+             r"\bbatch run\b)")
+    # a batch job's id: AsyncApexJob, key prefix 707; valid when 18 characters with Salesforce's suffix (sf18)
+    JOB = re.compile(r"(?<![A-Za-z0-9])(707[A-Za-z0-9]{12})([A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    # the guard's fields: the three npe01 e-mail fields, the four phone fields, the Volunteers signup date
+    GUARD_FIELDS = ("npe01__WorkEmail__c", "npe01__HomeEmail__c", "npe01__AlternateEmail__c", "npe01__WorkPhone__c",
+                    "HomePhone", "MobilePhone", "OtherPhone", "GW_Volunteers__Volunteer_Last_Web_Signup_Date__c")
+    SOQL_COUNT = r"SELECT\s+COUNT\(\)\s+FROM\s+Contact\b"
+    RAN = re.compile(r"(?i)\b(ran|run|runs|flagged|executed|applied|made|done)\b")
+    PENDING = DuplicateRuleDocs.PENDING
+    NEGATION, RULE_IDIOM = DuplicateRuleDocs.NEGATION, DuplicateRuleDocs.RULE_IDIOM
+    ACCOUNT, CONTACT = DuplicateRuleDocs.ACCOUNT, DuplicateRuleDocs.CONTACT
+    FLAG_WORD = {"duplicate": r"(?i:\bduplicates?\b)|Duplicate_Record__c", "obsolete": r"(?i:\bobsolete\b)|Obsolete_Record__c"}
+    ANY_FLAG = r"(?i:\bduplicates?\b|\bobsolete\b)|Duplicate_Record__c|Obsolete_Record__c"
+    # what a clause records: the dry run, the read-back, or the run (a run word, `flag` mode or a job id)
+    DRY = r"(?i)\bdry[- ]runs?\b|dryRun"
+    READ_BACK = r"(?i)\bread[- ]back\b|\bSOQL\b|COUNT\(\)"
+    RUN_WORDS = r"(?i)\b(ran|run|runs)\b|(?<![\w'])'flag'|--mode flag\b|\bflag mode\b"
+    CLEAR = r"(?<![\w-])`?'?clear'?`?(?![\w-])"
+    ROLLBACK_WORDS = r"(?i)\brollback\b|\broll(?:ed|s|ing)?\s+back\b|\bundo\b|\bway back\b|\bback to false\b"
+    # the guard: the three counts, named, and the stop unless each is 0
+    GUARD = (r"(?i)\be-?mail\b", r"(?i)\bphone\b", r"(?i)\bvolunteer|\bsign-?ups?\b", r"(?<![\w.,:/-])0\b|\bzero\b")
+    # a flag set by hand (administrators alone can: RUNBOOK "Duplicate and obsolete records in Salesforce", its
+    # bullet on who sets a flag by hand)
+    HAND = r"(?i)\bby hand\b|\bhand-set\b|\bmanual\w*|\badministrators?\b"
+    # the Result's clause giving step 4's count of the flags set by hand on records outside the criteria (a
+    # `flag` run never unsets them, so the read-back counts them on top of the dry run's): `set by hand` or
+    # `hand-set`, and `outside the criteria`, in the clause
+    HAND_SET = r"(?i)\bby hand\b|\bhand-set\b"
+    OUTSIDE = r"(?i)\boutside\b[^.;]{0,30}?\bcriteria\b"
+    GO = r"Ryan['’]s (go|answer|yes)\b"
+    FLAG_MODE = r"(?<![\w'])'flag'|(?i:\bflag mode\b|--mode flag\b|\bmode\b[^.;]{0,20}?\bflag\b|\bin flag\b)"
+    ORG = r"(?:^|\s)(?:-o|--target-org)\s+glow\b"
+    # what a count is not: a date, a ticket, a step number, a time, a span of months or days, a batch size, a
+    # percentage, a version, a Salesforce id (15 or 18 characters with a digit in them)
+    NOT_COUNTS = re.compile(r"\d{4}-\d\d-\d\d|#\d+|\bsteps?\s+\d+\b|\b\d\d:\d\d\b|\b\d+\s*(?:months?|days?|years?|weeks?)\b|"
+                            r"\b(?:scope|batch(?:es)? of|per batch)\s*\d+|\b\d+\s*%|\bv?\d+\.\d+\b|\b\d+/\d+\b|"
+                            r"(?<![A-Za-z0-9])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9])")
+    # --- the fix round after the review of PR #133 (Ryan, 2026-10-24, option a; findings 1, 4 and 5) ---------
+    # a `flag` run named: `flag` in backticks or quotes, "flag mode", "--mode flag", "a flag run"
+    FLAG_RUN = (r"(?<![\w'`])[`']flag[`'](?!\w)|(?i:\bflag mode\b|--mode flag\b|\bflag runs?\b|\bin flag\b|"
+                r"\bmode\b[^.;]{0,20}?\bflag\b)")
+    # the run only sets a flag: "only sets", "sets … only", "never unsets / clears / removes / takes … off /
+    # sets … false", "adds, never removes"
+    ONLY_SETS = (r"(?i)\bonly (ever )?sets\b|\bsets\b[^.;]{0,15}?\bonly\b|\bnever\b[^.;]{0,25}?\b(unsets?|clears?|"
+                 r"removes?|drops?|resets?|lowers?|takes?\b[^.;]{0,20}?\boff|turns?\b[^.;]{0,20}?\b(off|false)|"
+                 r"sets?\b[^.;]{0,25}?\bfalse)\b|\b(no|not|without) unsett?ing\b|\b(is|are) (never|not) unset\b|"
+                 r"\bunsets? (none|nothing|no flag)\b")
+    # the old statement, which option (a) retires unless the clause also says the run never unsets
+    SET_TO_CRITERIA = r"(?i)\bto (exactly )?what the criteria say\b|\bexactly what the criteria say\b"
+    # only `clear` takes a flag off: `clear` with an only-word within 50 characters of it (step 4's "administrators
+    # alone set a flag by hand" is another statement) and an off-word in the clause
+    ONLY_WORD = r"(?i:\bonly\b|\balone\b|\bnothing else\b|\bno other\b|\bthe (?:one|only|sole) (?:way|mode|run)\b)"
+    CLEAR_NEAR_ONLY = rf"{ONLY_WORD}[^.;]{{0,50}}?{CLEAR}|{CLEAR}[^.;]{{0,50}}?{ONLY_WORD}"
+    OFF_WORD = r"(?i)\boff\b|\bunsets?\b|\bunset\b|\bremov\w*|\bfalse\b|\bdrops?\b|\bresets?\b|\blowers?\b"
+    # a flag the criteria no longer ask for stays until a clear and a flag run
+    STALE = (r"(?i)\bstale\b|\bno longer\b|\bout of date\b|\boutdated\b|\breports? again\b|\bcomes? back\b|"
+             r"\bactive again\b|\bno more\b")
+    STAYS = r"(?i)\bstays?\b|\bkeeps?\b|\bkept\b|\bremains?\b|\bleft\b|\buntil\b"
+    # the read-only query that finds a run's job id (`sf apex run` prints none): Id selected, the class named,
+    # newest first - in one command line (a code block's line or a backticked span)
+    JOB_QUERY = (r"\bSELECT\b[^`]*?\bId\b[^`]*?\bFROM\s+AsyncApexJob\b", r"ApexClass\.Name\s*=\s*'RecordFlagBatch'",
+                 r"\bORDER\s+BY\s+(CreatedDate|CompletedDate|SystemModstamp)\s+DESC\b")
+    PRINTS_IT = r"(?i)\bas (the command|`?sf apex run`?|it) prints\b"
+    # the sharp s: the Apex side (toLowerCase) keeps Straße and STRASSE apart where Python's casefold joins them
+    SHARP_S = r"ß|(?i:\bStra(?:ß|ss)e\b|\beszett\b|\bsharp s\b)"
+    APEX_SIDE = r"RecordFlagBatch|(?i:\bApex\b|\btoLowerCase\b|\bthe batch\b|\bflagging batch\b)"
+    PYTHON_SIDE = r"duplicate_account_groups|(?i:\bcasefold\w*|\bPython\b)"
+    PARTS = (r"(?i)\bapart\b|\bdiffer\w*|\bdiverg\w*|\bunlike\b|\bwhere(as)?\b|\bbut\b|\bwhile\b|\bnot\b|"
+             r"\btwo names\b|\bone name\b|\bdistinct\b")
+
+    # --- reading the docs ---------------------------------------------------------------------------------
+    @staticmethod
+    def norm(text):
+        return re.sub(r"(?<=\w)\.(?=\w)", "_", flat(text))
+
+    def clauses(self, text, ends="."):
+        return sentences(self.norm(text), ends)
+
+    def denies(self, text):
+        return bool(self.NEGATION.search(self.RULE_IDIOM.sub(" ", text)))
+
+    def said(self, text, *patterns, ends=".;", negated=False):
+        return [s for s in self.clauses(text, ends)
+                if all(re.search(p, s) for p in patterns) and (negated or not self.denies(s))]
+
+    @staticmethod
+    def prose(text):
+        return re.sub(r"(?ms)^[ \t]*```.*?^[ \t]*```[^\n]*$", " ", text)
+
+    def section(self):
+        return md_part(self.RUNBOOK, self.SECTION)
+
+    @staticmethod
+    def body(path, heading):
+        part = md_part(path, heading)
+        return part.split("\n", 1)[1] if "\n" in part else ""
+
+    def header_line(self, part, label):
+        m = re.search(r"\*\*" + label + r":?\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", part, re.S)
+        self.assertTrue(m, f"RUNBOOK section {self.SECTION[3:]!r}: no `- **{label}:**` header line")
+        return flat(m.group(1))
+
+    def plan_path(self):
+        found = sorted(glob.glob(self.PLANS))
+        self.assertEqual(len(found), 1, "docs/plans/: one plan `YYYY-MM-DD-sf-record-flag-batch.md` for ticket #85 "
+                                        f"(found {[os.path.basename(p) for p in found]})")
+        self.assertRegex(os.path.basename(found[0]), r"^\d{4}-\d\d-\d\d-sf-record-flag-batch\.md$",
+                         "docs/plans/: the plan is named `YYYY-MM-DD-sf-record-flag-batch.md`")
+        return found[0]
+
+    @staticmethod
+    def raw_steps(text):
+        """The numbered steps of `text` (`1. …` at a line start), lines kept; a command line wrapped with `\\` at
+        the line's end is one line."""
+        return re.split(r"(?m)^[ \t]{0,3}\d{1,2}\.[ \t]+", re.sub(r"\\\n[ \t]*", " ", text))[1:]
+
+    @staticmethod
+    def commands(raw_step):
+        """The command lines of a step: each line of a fenced code block, each backticked span of the prose (a
+        span wrapped over two lines is one command)."""
+        out = []
+        for block in re.findall(r"(?ms)^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", raw_step):
+            out += block.split("\n")
+        prose = re.sub(r"(?ms)^[ \t]*```[^\n]*\n.*?^[ \t]*```[^\n]*$", " ", raw_step)
+        out += [flat(s) for s in re.findall(r"`([^`]+)`", prose)]
+        return [c.strip() for c in out if c.strip()]
+
+    @classmethod
+    def script_command(cls, commands, sobject, mode):
+        """A command line of the script writer for `sobject` in `mode`, complete: `--out` and `--vpn-off`, and
+        for Account `--roster` and `--partners` (which a Contact command never carries)."""
+        need = ["sf_record_flags.py", f"--sobject {sobject}", f"--mode {mode}", "--out", "--vpn-off"]
+        exports = ["--roster", "--partners"]
+        need, spare = (need + exports, []) if sobject == "Account" else (need, exports)
+        return [c for c in commands if all(w in c for w in need) and not any(w in c for w in spare)]
+
+    @classmethod
+    def apex_command(cls, commands):
+        """`sf apex run -o glow -f <script>`."""
+        return [c for c in commands if re.search(r"\bsf apex run\b", c) and re.search(r"(?:^|\s)(?:-f|--file)\s", c)
+                and re.search(cls.ORG, c)]
+
+    @classmethod
+    def validate_command(cls, commands):
+        """The check-only: `sf project deploy validate` (or `start --dry-run`) `-o glow` running the test class,
+        `--tests RecordFlagBatchTest` (`--test-level RunSpecifiedTests`)."""
+        return [c for c in commands if (re.search(r"\bsf project deploy validate\b", c)
+                                        or (re.search(r"\bsf project deploy start\b", c) and "--dry-run" in c))
+                and "RecordFlagBatchTest" in c and re.search(r"--tests\b|RunSpecifiedTests", c) and re.search(cls.ORG, c)]
+
+    @classmethod
+    def deploy_command(cls, commands):
+        """The deploy: `sf project deploy quick -o glow -i <the check-only's id>` (or `--job-id`), or `sf project
+        deploy start -o glow` without `--dry-run` running `--tests RecordFlagBatchTest`."""
+        return [c for c in commands if re.search(cls.ORG, c) and (
+            (re.search(r"\bsf project deploy quick\b", c) and re.search(r"(?:^|\s)(?:-i|--job-id)\s", c))
+            or (re.search(r"\bsf project deploy start\b", c) and "--dry-run" not in c and "RecordFlagBatchTest" in c
+                and re.search(r"--tests\b|RunSpecifiedTests", c)))]
+
+    @classmethod
+    def job_ids(cls, text):
+        """(the valid 18-character AsyncApexJob ids in `text`, the `707…` tokens that are not one: 15 characters,
+        or a suffix that is not Salesforce's)."""
+        good, bad = set(), set()
+        for m in cls.JOB.finditer(text):
+            body, suffix = m.groups()
+            (good if suffix and sf18(body) == body + suffix else bad).add(m.group(0))
+        return good, bad
+
+    def one_object(self, s):
+        """Which of Account and Contact clause `s` names, when it names exactly one."""
+        account, contact = re.search(self.ACCOUNT, s), re.search(self.CONTACT, s)
+        return "Account" if account and not contact else "Contact" if contact and not account else None
+
+    def kind(self, s):
+        """What clause `s` records: step 4's count of the flags set by hand outside the criteria (`set by hand`
+        or `hand-set` with `outside the criteria`; first, so its `COUNT()` or `run` is not read as another
+        kind's), the dry run (`dry run`, `dryRun`), the read-back (`read-back`, `SOQL`, `COUNT()`), or the run
+        (`ran`, `run`, `flag` mode, or a job id)."""
+        if re.search(self.HAND_SET, s) and re.search(self.OUTSIDE, s):
+            return "hand-set"
+        if re.search(self.DRY, s):
+            return "dry run"
+        if re.search(self.READ_BACK, s):
+            return "read-back"
+        if re.search(self.RUN_WORDS, s) or self.job_ids(s)[0]:
+            return "run"
+        return None
+
+    def flag_counts(self, clause, flag):
+        """The counts of records flagged `flag` in `clause`: a number right after the flag word (`duplicate 12`,
+        `duplicate: 12`, `Duplicate_Record__c = true: 12`) or up to three words before it with no other number
+        or flag word between (`12 Accounts flagged duplicate`, `12 Accounts duplicate and 3 obsolete`). Dates,
+        tickets, times, spans, batch sizes, percentages, versions and Salesforce ids are never counts."""
+        text = self.NOT_COUNTS.sub(" ", clause)
+        claimed, out = set(), set()
+        for name, word in self.FLAG_WORD.items():
+            for m in re.finditer(rf"(?:{word})(?:\s*=\s*true)?\s*[:=]?\s*({self.NUMBER})", text):
+                claimed.add(m.start(1))
+                if name == flag:
+                    out.add(int(m.group(1).replace(",", "")))
+        between = rf"(?:\s+(?!\d)(?!{self.ANY_FLAG})[\w'’-]+){{0,3}}"
+        for m in re.finditer(rf"({self.NUMBER}){between}\s+(?:{self.FLAG_WORD[flag]})", text):
+            if m.start(1) not in claimed:
+                out.add(int(m.group(1).replace(",", "")))
+        return out
+
+    def run_record(self, clauses, obj_name):
+        """The clauses of a run record for `obj_name`: naming it alone (a semicolon or a full stop ends a
+        clause: `Account …; Contact …`) and carrying a run's job id or a date on or after the first possible day."""
+        return [s for s in clauses if self.one_object(s) == obj_name
+                and (self.job_ids(s)[0] or any(d >= self.FIRST_RUN_DAY for d in self.DATE.findall(s)))]
+
+    HOW = ("a number right beside the word (`12 Accounts duplicate`, `duplicate 12`, `Duplicate_Record__c = true: "
+           "12`), in a clause naming the object alone (a semicolon ends a clause: `Account …; Contact …`)")
+
+    # --- the RUNBOOK section ----------------------------------------------------------------------------
+    def test_the_runbook_records_the_flagging_run(self):
+        """What an offline test can check of a live run is the record's structure and consistency, never that
+        the run happened: no test here, and nothing else in the repository, can tell a real run from a
+        fabricated one - a run sentence, counts and ids can all be typed, and the id suffix only makes a typed
+        id cost a computation. The gate against a fabricated run is procedural: the run is made on Ryan's go
+        through the live gate, which a subagent or a headless run cannot answer, and Ryan lands the pull
+        request having seen the run. What this test pins: the section says the batch ran, on what day and at
+        what time (`HH:MM UTC` beside the date), each object's run with its own 18-character AsyncApexJob id
+        (`707…`, Salesforce's case-safe suffix checked) in a sentence with the date and the time, and a count
+        for each flag on each object equal to the plan's `## Result` read-back's - which carries per object and
+        flag the dry run's count and the run's count, which agree, step 4's count of the flags set by hand
+        outside the criteria (a clause of its own, 0 included), and the read-back's count, exactly the dry
+        run's plus that hand-set count (a `flag` run never unsets a flag: Ryan, 2026-10-24), and the same
+        job ids (the plan `status: done`, with its `done:` date); that the rollback is a run in `clear` mode
+        (on the `- **Rollback:**` header line, anywhere on it: #84's rollback of the rules comes first); and
+        how to run it again (the script writer and `sf apex run`)."""
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        part = self.section()
+        self.assertRegex(part, r"RecordFlagBatch", f"{where}: name the batch class `RecordFlagBatch`")
+        self.assertIn("tools/sf_record_flags.py", part,
+                      f"{where}: name the script writer `tools/sf_record_flags.py` (how to run it again)")
+        self.assertRegex(part, r"sf apex run", f"{where}: say the script runs with `sf apex run` (how to run it again)")
+        today = datetime.date.today().isoformat()
+        sentences_, clauses_ = self.clauses(part), self.clauses(part, ".;")
+        run = [s for s in sentences_ if re.search(self.BATCH, s) and self.RAN.search(s) and not self.PENDING.search(s)
+               and any(d >= self.FIRST_RUN_DAY for d in self.DATE.findall(s))]
+        self.assertTrue(run, f"{where}: record the run in one sentence with its date ({self.FIRST_RUN_DAY} or later): "
+                             "which batch ran on what day - not as pending, awaited or still to come")
+        for s in run:
+            for d in self.DATE.findall(s):
+                self.assertLessEqual(d, today, f"{where}: the run is recorded on {d}, after today ({today}): a result "
+                                               "is written when it exists, never ahead")
+        self.assertTrue(any(re.search(self.TIME, s) for s in run),
+                        f"{where}: give the run's time beside its date, `HH:MM UTC`, as the #84 Status line does")
+        # each object's run is a batch job of its own: its 18-character AsyncApexJob id, in a clause naming the
+        # object alone that is not the dry run's, in a sentence with the run's date and time
+        good, bad = self.job_ids(part)
+        self.assertFalse(bad, f"{where}: {sorted(bad)} are not 18-character AsyncApexJob ids with Salesforce's "
+                              "case-safe suffix: copy each id as `sf apex run` or `SELECT Id FROM AsyncApexJob` gives it")
+        jobs = {}
+        for obj_name in ("Account", "Contact"):
+            jobs[obj_name] = {j for s in clauses_ if self.one_object(s) == obj_name and self.kind(s) != "dry run"
+                              and not self.PENDING.search(s) for j in self.job_ids(s)[0]}
+            self.assertTrue(jobs[obj_name], f"{where}: give the {obj_name} run's 18-character AsyncApexJob id (`707…`) "
+                                            f"in a clause naming {obj_name} alone (a semicolon ends a clause: "
+                                            "`Account …; Contact …`) that does not name the dry run")
+        self.assertFalse(jobs["Account"] & jobs["Contact"],
+                         f"{where}: the Account run and the Contact run are two jobs, each with its own id: "
+                         f"{sorted(jobs['Account'] & jobs['Contact'])} is given for both")
+        for s in sentences_:
+            if self.job_ids(s)[0] and self.kind(s) != "dry run":
+                self.assertRegex(s, self.TIME, f"{where}: the sentence giving a run's job id gives the run's time, "
+                                               f"`HH:MM UTC`, beside its date: {s[:160]!r}")
+                self.assertTrue(any(d >= self.FIRST_RUN_DAY for d in self.DATE.findall(s)),
+                                f"{where}: the sentence giving a run's job id gives the run's date ({self.FIRST_RUN_DAY} "
+                                f"or later): {s[:160]!r}")
+        # the plan: done, and its Result agreeing with the section on the ids and the counts
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        keys, _ = docs_index.frontmatter(read(path))
+        word, _ = docs_index.status_of(keys.get("status", ""))
+        self.assertEqual(word, "done", f"{name}: once the RUNBOOK records the run, the plan is `status: done` "
+                                       f"(it is {word!r})")
+        self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:` with its date")
+        result_text = self.body(path, "## Result")
+        result = self.clauses(result_text, ".;")
+        good, bad = self.job_ids(result_text)
+        self.assertFalse(bad, f"{name}: `## Result`: {sorted(bad)} are not 18-character AsyncApexJob ids with "
+                              "Salesforce's case-safe suffix: copy each id as `sf apex run` gives it")
+        for obj_name in ("Account", "Contact"):
+            there = {j for s in result if self.one_object(s) == obj_name and self.kind(s) == "run" for j in self.job_ids(s)[0]}
+            self.assertEqual(there, jobs[obj_name], f"{name}: `## Result` gives the {obj_name} run's job id(s) "
+                                                    f"{sorted(there)} in a run clause naming {obj_name} alone; the "
+                                                    f"RUNBOOK gives {sorted(jobs[obj_name])}: the two agree")
+        agreed = {}
+        for obj_name in ("Account", "Contact"):
+            for flag_name in ("duplicate", "obsolete"):
+                found = {k: set() for k in ("dry run", "run", "hand-set", "read-back")}
+                for s in result:
+                    if self.one_object(s) == obj_name and self.kind(s) in found:
+                        found[self.kind(s)] |= self.flag_counts(s, flag_name)
+                said = ", ".join(f"{k} {sorted(v)}" for k, v in found.items())
+                for k, counts in found.items():
+                    self.assertTrue(counts, f"{name}: `## Result` gives no {k} count of {obj_name}s flagged {flag_name}: "
+                                            f"a clause of the {k} (" + {"dry run": "`dry run`", "run": "`ran`, `run` or the job id, "
+                                                                        "not naming the dry run or the read-back",
+                                                                        "hand-set": "step 4's count of the flags set by hand "
+                                                                        "on records outside the criteria, 0 included: "
+                                                                        "`set by hand` or `hand-set` with `outside the "
+                                                                        "criteria`, in a clause of its own, e.g. `Account set "
+                                                                        "by hand outside the criteria (step 4): duplicate 0, "
+                                                                        "obsolete 2`",
+                                                                        "read-back": "`read-back` or `SOQL`, not naming "
+                                                                        "the dry run or the flags set by hand outside the "
+                                                                        "criteria"}[k] + f") with {self.HOW}")
+                ran = found["dry run"] | found["run"]
+                self.assertEqual(len(ran), 1, f"{name}: `## Result`: the dry run's and the run's count of {obj_name}s "
+                                              f"flagged {flag_name} are {said}: the two agree, and each clause gives "
+                                              "one number per flag")
+                self.assertEqual(len(found["hand-set"]), 1,
+                                 f"{name}: `## Result`: step 4's count of {obj_name}s flagged {flag_name} set by hand "
+                                 f"outside the criteria is {sorted(found['hand-set'])}: one number per flag, 0 included")
+                expected = next(iter(ran)) + next(iter(found["hand-set"]))
+                self.assertEqual(found["read-back"], {expected},
+                                 f"{name}: `## Result`: the read-back's count of {obj_name}s flagged {flag_name} "
+                                 f"({sorted(found['read-back'])}) is exactly the dry run's ({sorted(ran)}) plus the "
+                                 f"flags step 4 counted set by hand outside the criteria ({sorted(found['hand-set'])}) "
+                                 f"= {expected}: a `flag` run never unsets a flag (Ryan, 2026-10-24) [{said}]")
+                agreed[obj_name, flag_name] = found["read-back"]
+        # the section's counts: every count in its run record (a clause of the flags set by hand outside the
+        # criteria aside) equals the plan's read-back's
+        for obj_name in ("Account", "Contact"):
+            record = self.run_record(clauses_, obj_name)
+            for flag_name in ("duplicate", "obsolete"):
+                here = set()
+                for s in record:
+                    if self.kind(s) != "hand-set":
+                        here |= self.flag_counts(s, flag_name)
+                self.assertTrue(here, f"{where}: give the run's count of {obj_name}s flagged {flag_name} (the read-back's): "
+                                      f"{self.HOW}, carrying the run's job id or dated {self.FIRST_RUN_DAY} or later")
+                self.assertEqual(here, agreed[obj_name, flag_name],
+                                 f"{where}: the count of {obj_name}s flagged {flag_name} ({sorted(here)}) is not the "
+                                 f"plan's Result's read-back ({sorted(agreed[obj_name, flag_name])}): the two agree, each "
+                                 "from the read-back (the dry run's plus the flags set by hand outside the criteria)")
+        rollback_line = self.header_line(part, "Rollback")
+        self.assertRegex(rollback_line, self.CLEAR, f"{where}: the `- **Rollback:**` header line names `clear` mode "
+                                                    "(anywhere on the line: #84's rollback of the rules comes first)")
+        clear_said = [s for s in sentences(rollback_line, ".;") if re.search(self.CLEAR, s) and not self.denies(s)]
+        self.assertTrue(clear_said, f"{where}: the Rollback line's `clear` is said, not denied")
+        self.assertRegex(part, r"RecordFlagBatch\([^)]*'clear'",
+                         f"{where}: show the clear call, `new RecordFlagBatch('<object>', 'clear'…)`")
+
+    # --- the plan ---------------------------------------------------------------------------------------
+    def test_a_plan_carries_the_dry_run_before_the_run(self):
+        """The plan's Rollout, numbered and in order, each step with its command line: the check-only (naming
+        the test class), the deploy (by the check-only's id, or with the test class), the guard's three counts
+        (the SOQL), a count of the flags set by hand, the dry run (the script writer's command lines and `sf
+        apex run`), Ryan's confirmation of the counts, the run (Account, then the guard again - the SOQL or the
+        tool's Contact command - then Contact), the read-back (`COUNT()` of each flag by its field); each live
+        write on Ryan's go; the Rollback a run in `clear` mode that says `clear` wipes the hand-set flags too
+        and names the saved ids (`flagged.csv`)."""
+        sys.path.insert(0, os.path.join(REPO, "scripts"))
+        import docs_index
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        text = read(path)
+        keys, _ = docs_index.frontmatter(text)
+        self.assertIn("status", keys, f"{name}: frontmatter `status:`")
+        word, problem = docs_index.status_of(keys["status"])
+        self.assertIsNone(problem, f"{name}: {problem}")
+        self.assertIn(word, ("proposed", "accepted", "in-progress", "done"),
+                      f"{name}: the plan is proposed, accepted, in-progress or done (not {word!r})")
+        self.assertRegex(text.split("\n## ", 1)[0], self.TICKET,
+                         f"{name}: name ticket #85 in the frontmatter, the title or the opening paragraph")
+        for heading in ("## Rollout", "## Rollback", "## Result"):
+            self.assertRegex(text, r"(?m)^" + re.escape(heading) + r"\b", f"{name}: no `{heading}` section")
+        rollout_raw, rollback_raw = self.body(path, "## Rollout"), self.body(path, "## Rollback")
+        rollout, rollback = self.prose(rollout_raw), self.prose(rollback_raw)
+        for heading, part in (("## Rollout", rollout), ("## Rollback", rollback)):
+            self.assertNotRegex(self.norm(part), r"(?i)\b(TBD|TODO|TBA|FIXME)\b", f"{name}: `{heading}` is a placeholder")
+            self.assertGreaterEqual(len({w.lower() for w in re.findall(r"[A-Za-z]\w*", self.norm(part))}),
+                                    60 if heading == "## Rollout" else 15, f"{name}: `{heading}` says too little")
+        flat_rollout = self.norm(rollout)
+        self.assertRegex(flat_rollout, self.SCRIPT, f"{name}: the Rollout writes each script with `tools/sf_record_flags.py`")
+        self.assertRegex(flat_rollout, r"RecordFlagBatch", f"{name}: the Rollout names `RecordFlagBatch`")
+        raw_steps = self.raw_steps(rollout_raw)
+        steps = [self.norm(s) for s in self.raw_steps(rollout)]
+        self.assertEqual(len(steps), len(raw_steps), f"{name}: a numbered step starts inside a code block")
+        self.assertGreaterEqual(len(steps), 9, f"{name}: number the Rollout's steps (`1. …`, at least nine: the "
+                                               "check-only, the deploy, the guard counts, the count of hand-set "
+                                               "flags, the dry run, Ryan's confirmation of the counts, the Account "
+                                               "run, the guard again, the Contact run, the read-back)")
+
+        def first(test):
+            return next((i for i, s in enumerate(steps) if test(s)), None)
+
+        def has(*patterns):
+            return lambda s: all(re.search(p, s) for p in patterns)
+
+        check = first(has(r"(?i)check-only|sf project deploy validate|--dry-run"))
+        deploy = first(has(r"sf project deploy (quick|start)\b(?![^.;]{0,60}--dry-run)"))
+        guard = first(has(*self.GUARD))
+        dry = first(has(r"dryRun"))
+        confirm = first(has(r"Ryan", r"(?i)\b(confirm\w*|agree\w*|accept\w*|answer\w*|says|said|yes|ok)\b",
+                            r"(?i)\bcounts?\b"))
+        run_account = first(has(self.FLAG_MODE, self.ACCOUNT))
+        run_contact = first(has(self.FLAG_MODE, self.CONTACT))
+        read_back = first(has(r"(?i)\bread[- ]back\b|\bSOQL\b", r"(?i)\b(equal\w*|same|match\w*)\b", r"(?i)\bdry[- ]run\b"))
+        hand = next((i for i, s in enumerate(raw_steps) if has(self.HAND, r"(?i)\bcount\w*", r"Duplicate_Record__c",
+                                                                r"Obsolete_Record__c")(s)), None)
+        for label, i in (("the check-only", check), ("the deploy (`sf project deploy quick -o glow -i <validation id>` or "
+                                                     "`start` without `--dry-run`)", deploy),
+                         ("the guard's three counts (Email, Phone, Volunteer signups), stopping unless each is 0", guard),
+                         ("the count of the flags set by hand before the run (`COUNT()` of `Duplicate_Record__c` and "
+                          "`Obsolete_Record__c`, with `by hand`, `hand-set` or `administrators`)", hand),
+                         ("the dry run (`dryRun`)", dry), ("Ryan's confirmation of the counts", confirm),
+                         ("the run of Account in flag mode", run_account), ("the run of Contact in flag mode", run_contact),
+                         ("the read-back (the SOQL count of each flag equals the dry run's)", read_back)):
+            self.assertIsNotNone(i, f"{name}: no Rollout step is {label}")
+        self.assertTrue(check < deploy < guard < dry < confirm < run_account <= run_contact < read_back,
+                        f"{name}: the Rollout's steps come in this order, each its own step: the check-only (step "
+                        f"{check + 1}), the deploy ({deploy + 1}), the guard counts ({guard + 1}), the dry run "
+                        f"({dry + 1}), Ryan's confirmation of the counts ({confirm + 1}), the run - Account "
+                        f"({run_account + 1}), then Contact ({run_contact + 1}) - and the read-back ({read_back + 1})")
+        self.assertLess(hand, run_account, f"{name}: the flags set by hand are counted (step {hand + 1}) before the run "
+                                           f"(step {run_account + 1}): `clear` would wipe them too")
+        if run_account == run_contact:
+            s = steps[run_account]
+            self.assertLess(re.search(self.ACCOUNT, s).start(), re.search(self.CONTACT, s).start(),
+                            f"{name}: the run step runs Account first, then Contact")
+        again = [i for i, s in enumerate(steps) if has(*self.GUARD)(s) and dry < i <= run_contact]
+        self.assertTrue(again, f"{name}: a step after the dry run and no later than the Contact run counts the guard's "
+                               "three things again (Email, Phone, Volunteer signups) and stops unless each is 0")
+        for label, i in (("the deploy", deploy), ("the dry run", dry), ("the run", run_account)):
+            self.assertRegex(steps[i], self.GO, f"{name}: {label} step says it waits for Ryan's go")
+        self.assertNotRegex(flat_rollout, r"(?i)\btaken as (the|his|a) go\b|\bcounts? as (the|his|a) go\b|\bstanding go\b|"
+                                          r"\bblanket go\b|\bgo in advance\b|\bwithout (asking|a prompt|his answer)\b",
+                            f"{name}: nothing said earlier is the go: each go is Ryan's answer to that step's prompt")
+        # the steps' substance, code blocks kept: each step carries its command line (in backticks or a code
+        # block), the guard the SOQL naming the fields it counts, the read-back the count of each flag by its field
+
+        def field(f):
+            return rf"(?<![A-Za-z0-9]){re.escape(f)}(?![A-Za-z0-9])"
+
+        def soql_guard(s):
+            return (re.search(self.SOQL_COUNT, s) and all(re.search(field(f), s) for f in self.GUARD_FIELDS)
+                    and re.search(r"\bTODAY\b", s))
+
+        self.assertTrue(self.validate_command(self.commands(raw_steps[check])),
+                        f"{name}: the check-only step (step {check + 1}) carries its command line: `sf project deploy "
+                        "validate -o glow … --test-level RunSpecifiedTests --tests RecordFlagBatchTest` (or `start "
+                        "--dry-run` with the same)")
+        self.assertTrue(self.deploy_command(self.commands(raw_steps[deploy])),
+                        f"{name}: the deploy step (step {deploy + 1}) carries its command line: `sf project deploy quick "
+                        "-o glow -i <the check-only's id>`, or `sf project deploy start -o glow … --tests "
+                        "RecordFlagBatchTest` without `--dry-run`")
+        self.assertRegex(raw_steps[deploy], r"RecordFlagBatchTest",
+                         f"{name}: the deploy step (step {deploy + 1}) names the test class `RecordFlagBatchTest` the "
+                         "build was validated with")
+        self.assertRegex(raw_steps[deploy], r"(?i)\bcheck-only\b|\bvalidat",
+                         f"{name}: the deploy step (step {deploy + 1}) names the check-only it deploys")
+        self.assertTrue(soql_guard(raw_steps[guard]),
+                        f"{name}: the guard step (step {guard + 1}) carries its SOQL, `SELECT COUNT() FROM Contact WHERE "
+                        "…`: Email blank with npe01__WorkEmail__c, npe01__HomeEmail__c or npe01__AlternateEmail__c set, "
+                        "Phone blank with npe01__WorkPhone__c, HomePhone, MobilePhone or OtherPhone set, "
+                        "GW_Volunteers__Volunteer_Last_Web_Signup_Date__c = TODAY (in a code block or inline)")
+        self.assertTrue(any(soql_guard(raw_steps[i]) or self.script_command(self.commands(raw_steps[i]), "Contact", "flag")
+                            or self.script_command(self.commands(raw_steps[i]), "Contact", "dryRun") for i in again),
+                        f"{name}: the guard step before the Contact run (step {again[0] + 1}) carries the guard itself: "
+                        "the three SOQL counts naming their fields, or the tool's Contact command line (which runs "
+                        "the guard first) - not three words and a 0")
+        self.assertRegex(raw_steps[hand], r"COUNT\(\)", f"{name}: the count of the flags set by hand (step {hand + 1}) is "
+                                                         "a SOQL `COUNT()` of `Duplicate_Record__c` and `Obsolete_Record__c`")
+        dry_commands = [c for i, s in enumerate(raw_steps) if "dryRun" in s for c in self.commands(s)]
+        for sobject in ("Account", "Contact"):
+            self.assertTrue(self.script_command(dry_commands, sobject, "dryRun"),
+                            f"{name}: the dry-run step(s) carry the script writer's full command line for {sobject}: "
+                            f"`python3 tools/sf_record_flags.py --sobject {sobject} --mode dryRun "
+                            + ("--roster <Roster export> --partners <Partners export> " if sobject == "Account" else "")
+                            + "--out <script> --vpn-off` (a Contact command carries no --roster or --partners)")
+        self.assertTrue(self.apex_command(dry_commands),
+                        f"{name}: the dry-run step(s) run the script: `sf apex run -o glow -f <script>`")
+        for sobject, i in (("Account", run_account), ("Contact", run_contact)):
+            commands = self.commands(raw_steps[i])
+            self.assertTrue(self.script_command(commands, sobject, "flag"),
+                            f"{name}: the {sobject} run step (step {i + 1}) carries the script writer's full command line, "
+                            f"as the dry-run step does: `python3 tools/sf_record_flags.py --sobject {sobject} --mode flag "
+                            + ("--roster … --partners … " if sobject == "Account" else "") + "--out <script> --vpn-off`")
+            self.assertTrue(self.apex_command(commands),
+                            f"{name}: the {sobject} run step (step {i + 1}) runs the script: `sf apex run -o glow -f <script>`")
+        self.assertTrue("Duplicate_Record__c" in raw_steps[read_back] and "Obsolete_Record__c" in raw_steps[read_back]
+                        and re.search(r"COUNT\(\)", raw_steps[read_back]),
+                        f"{name}: the read-back step (step {read_back + 1}) counts each flag by its field, `COUNT()` with "
+                        "`Duplicate_Record__c` and `Obsolete_Record__c` (the SOQL)")
+        self.assertTrue(self.said(rollback, self.CLEAR, rf"RecordFlagBatch|sf apex run|{self.SCRIPT}"),
+                        f"{name}: the Rollback runs the batch in `clear` mode (one sentence naming `clear` with "
+                        "RecordFlagBatch, `sf apex run` or the script writer)")
+        self.assertNotRegex(self.norm(rollback), r"(?i)\bno rollback\b|\bnothing to roll back\b|\bcannot be rolled back\b",
+                            f"{name}: the Rollback is `clear` mode, never \"no rollback\"")
+        self.assertTrue(self.said(rollback, self.CLEAR, self.HAND, negated=True),
+                        f"{name}: the Rollback says `clear` wipes the flags set by hand too (one sentence naming `clear` "
+                        "with `by hand`, `hand-set` or `administrators`: the count of step "
+                        f"{hand + 1} says how many to set again)")
+        self.assertRegex(rollback_raw, r"flagged\.csv", f"{name}: the Rollback names the saved ids, "
+                                                         "`data/sf_record_flags_<date>/flagged.csv`, the other way back")
+        if word == "done":
+            today = datetime.date.today().isoformat()
+            result = self.norm(self.prose(self.body(path, "## Result")))
+            self.assertTrue(re.search(r"[A-Za-z]{3,}", result), f"{name}: a done plan's `## Result` says what ran")
+            dates = [d for d in self.DATE.findall(result) if d >= self.FIRST_RUN_DAY]
+            self.assertTrue(dates, f"{name}: a done plan's Result dates the run ({self.FIRST_RUN_DAY} or later)")
+            self.assertLessEqual(max(dates), today, f"{name}: the Result is dated after today ({today})")
+            self.assertRegex(result, self.TIME, f"{name}: a done plan's Result gives the run's time, `HH:MM UTC`")
+            self.assertRegex(keys.get("done", ""), r"^\d{4}-\d\d-\d\d", f"{name}: a done plan carries `done:`")
+
+    # --- the fix round after the review of PR #133 (Ryan, 2026-10-24, option a) -------------------------
+    def test_the_docs_say_a_flag_run_only_sets_flags_and_clear_alone_unsets_one(self):
+        """Ryan, 2026-10-24, option (a): a `flag` run only SETS a flag and never unsets one - a flag set by hand
+        on a record the criteria do not match stays - and a flag comes off only through `clear` (after the
+        hand-set flags are counted); a stale flag (a club that reports again) stays until a `clear` and a `flag`
+        run. The RUNBOOK section and the plan say so in substance, each in its own clauses, and neither keeps the
+        old "sets each flag to what the criteria say" unqualified."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        for label, text in ((where, self.section()), (name, self.prose(read(path)))):
+            clauses = self.clauses(text, ".;")
+            only_sets = [s for s in clauses if re.search(self.FLAG_RUN, s) and re.search(self.ONLY_SETS, s)]
+            self.assertTrue(only_sets, f"{label}: say that a `flag` run only sets a flag and never unsets one (one "
+                                       "clause naming the `flag` run with `only sets`, `never unsets`, `never takes a "
+                                       "flag off` or the like: Ryan, 2026-10-24, option a)")
+            only_clear = [s for s in clauses if re.search(self.CLEAR_NEAR_ONLY, s) and re.search(self.OFF_WORD, s)]
+            self.assertTrue(only_clear, f"{label}: say that a flag comes off only through `clear` (one clause with "
+                                        "`only`, `alone` or `the only way` beside `clear`, and `off`, `unset` or `false`)")
+            for s in clauses:
+                if re.search(self.SET_TO_CRITERIA, s):
+                    self.assertRegex(s, self.ONLY_SETS, f"{label}: a `flag` run no longer sets each flag to what the "
+                                                        f"criteria say - it only sets, never unsets; drop or qualify: "
+                                                        f"{s[:160]!r}")
+        stale = [s for s in self.clauses(self.section(), ".;")
+                 if re.search(self.STALE, s) and re.search(self.CLEAR, s) and re.search(self.STAYS, s)]
+        self.assertTrue(stale, f"{where}: say that a flag the criteria no longer ask for (a stale obsolete flag: a club "
+                               "that reports again) stays until a `clear` run and a `flag` run (one clause with `stale`, "
+                               "`no longer` or `reports again`, `clear`, and `stays`, `kept` or `until`)")
+
+    def test_each_run_step_of_the_plan_finds_its_job_id_by_an_asyncapexjob_query(self):
+        """`sf apex run` of a one-statement script prints no job id (review of PR #133, finding 5), so each
+        Rollout step that runs one - the dry run, the Account run, the Contact run - carries the read-only query
+        that finds it, `SELECT Id … FROM AsyncApexJob WHERE ApexClass.Name = 'RecordFlagBatch' … ORDER BY
+        CreatedDate DESC` (newest first), as a command line (a code block's line or a backticked span), and none
+        says the id is recorded "as the command prints it"."""
+        path = self.plan_path()
+        name = os.path.relpath(path, REPO)
+        raw_steps = self.raw_steps(self.body(path, "## Rollout"))
+        job_steps = [i for i, s in enumerate(raw_steps) if self.apex_command(self.commands(s))]
+        self.assertGreaterEqual(len(job_steps), 3, f"{name}: the Rollout runs `sf apex run -o glow -f <script>` in at "
+                                                   "least three steps: the dry run, the Account run, the Contact run "
+                                                   f"(found in steps {[i + 1 for i in job_steps]})")
+        for i in job_steps:
+            commands = self.commands(raw_steps[i])
+            self.assertTrue(any(all(re.search(p, c) for p in self.JOB_QUERY) for c in commands),
+                            f"{name}: step {i + 1} runs `sf apex run` and so carries, as a command line, the read-only "
+                            "query that finds the run's job id: `SELECT Id, Status, NumberOfErrors FROM AsyncApexJob "
+                            "WHERE ApexClass.Name = 'RecordFlagBatch' ORDER BY CreatedDate DESC LIMIT 1` (`sf apex run` "
+                            "prints no id)")
+            self.assertNotRegex(flat(raw_steps[i]), self.PRINTS_IT,
+                                f"{name}: step {i + 1} says the job id is recorded as the command prints it: `sf apex "
+                                "run` prints no id for a one-statement script; the AsyncApexJob query finds it")
+
+    def test_the_runbook_states_the_sharp_s_divergence(self):
+        """The batch keys an Account's name with toLowerCase and `duplicate_account_groups` with casefold, so
+        'Straße' and 'STRASSE' are two names to the batch and one to the monthly check (review of PR #133,
+        finding 4): the RUNBOOK section says so in one sentence naming both sides and that they part."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        hits = [s for s in self.clauses(self.section()) if re.search(self.SHARP_S, s)
+                and re.search(self.APEX_SIDE, s) and re.search(self.PYTHON_SIDE, s)]
+        self.assertTrue(hits, f"{where}: state the sharp-s divergence in one sentence naming both sides: the batch "
+                              "(Apex, `toLowerCase`) keeps `Straße` and `STRASSE` apart, `duplicate_account_groups` "
+                              "(casefold) joins them")
+        self.assertTrue(any(re.search(self.PARTS, s) for s in hits),
+                        f"{where}: the sharp-s sentence says the two sides part (`apart`, `differ`, `where`, `but`): "
+                        f"{hits[0][:160]!r}")
 
 
 if __name__ == "__main__":

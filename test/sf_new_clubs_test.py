@@ -182,7 +182,14 @@ class SalesforceNewClubs(Fixture):
             fh.write(",".join(salesforce.PARTNER_COLS) + f"\nNameless Partner,{P1},\n")
         with self.assertRaises(sfn.Refused):
             salesforce.read_partners(self.partners)                             # an unnamed partner account
-        self.assertEqual(len(salesforce.read_partners()), 49)       # the real map: one line per partner
+        self.assertEqual(len(salesforce.read_partners()), 50)       # the real map: one line per partner (#212: 50)
+
+    def test_the_real_map_holds_omid_foundation(self):
+        """#212: OMID Foundation (Asia) maps to its Household account, so its new clubs get that parent."""
+        real = salesforce.read_partners()
+        self.assertEqual(real.get("omid foundation"), ("001RP000002nJZiYAM", "OMID Foundation"))
+        self.assertEqual([k for k, (pid, _) in real.items() if pid == "001RP000002nJZiYAM"], ["omid foundation"],
+                         "001RP000002nJZiYAM is OMID Foundation's account alone")
 
     # ---- the guard
     def test_a_read_that_is_not_the_whole_org_stops_every_write(self):

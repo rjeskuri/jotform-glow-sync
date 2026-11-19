@@ -3,8 +3,10 @@
 #
 # data/, backups/ and credentials/ hold minors' names or secrets and are never
 # edited by hand; appsscript/Regions.gs is generated; the per-machine Claude
-# settings and the live-gate log are not source. Exit 2 blocks the edit and
-# shows the reason.
+# settings and the live-gate log are not source; the backup records
+# (.claude/live_backups.log, written only by glow/live_backups.py) are what the
+# live gate trusts for an automatic go, so an edit of them is a forged record.
+# Exit 2 blocks the edit and shows the reason.
 #
 # The match is on path components, so the same set is protected in every copy
 # of the repository (the main checkout, a worktree under .claude/worktrees/, a
@@ -66,7 +68,7 @@ protected() {   # a scoped path
     */data/*|*/backups/*) return 0 ;;
     */credentials/README.md|*/credentials/config.example.json) ;;
     */credentials/*) return 0 ;;
-    */appsscript/Regions.gs|*/.claude/settings.json|*/.claude/settings.local.json|*/.claude/live_gate.log|*/.claude/hooks/*)
+    */appsscript/Regions.gs|*/.claude/settings.json|*/.claude/settings.local.json|*/.claude/live_gate.log|*/.claude/live_backups.log|*/.claude/hooks/*)
       return 0 ;;
   esac
   case "$name" in
