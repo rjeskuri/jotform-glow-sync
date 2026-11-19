@@ -63,6 +63,17 @@ stops nothing; an export without the jotform column is an ATTENTION, and a plan
 that would restore a roster from it is held. Before each region the form's status
 is read: a form that is not ENABLED is `skipped` (SyncLog), not failed, and
 nothing is run against it; a status that cannot be read is `failed`.
+
+With SF_SYNC at plan or apply and the secrets set, the Salesforce step's login
+also watches the attendance processor (#242, after incident #238: another
+team's release overwrote it unnoticed for 3 1/2 weeks; Run.sf_watch): an
+ATTENTION for each watched Apex component (AttendanceBatchProcessor,
+AttendanceBatchTrigger, AttendanceBatchTriggerTest) whose body is not the build
+recorded in glow/apex_fingerprints.json, is missing, or could not be read -
+naming it, its LastModifiedDate and the modifier's user id, never the body -
+and an ATTENTION when no Jotform batch has been created for 48 hours, judged on
+a weekday (UTC). A watch read that fails is an ATTENTION of its own
+(docs/RUNBOOK.md, "Attendance processor watch").
 """
 import argparse
 import csv
@@ -87,7 +98,7 @@ from glow import usage  # noqa: E402  (Jotform's storage against the plan's limi
 from glow.jotform import Client  # noqa: E402  (the one read this file makes itself: the usage)
 from glow.sync import SHEET_ZONE, sf_name_clashes  # noqa: E402  (standard library only)
 from glow.text import key  # noqa: E402
-from glow.salesforce import Org, client_credentials  # noqa: E402
+from glow.salesforce import Org, apex_attention, batch_gap_attention, client_credentials  # noqa: E402
 import sf_new_clubs as sfn  # noqa: E402  (new clubs' Salesforce accounts, BACKLOG 27)
 
 # The live regional forms (one source: glow/forms.py, parity-tested against
@@ -941,13 +952,34 @@ class Run:
             self.log("SF: not configured (secrets SF_CLIENT_ID / SF_CLIENT_SECRET) - skipped")
             return
         self.log(f"SF: {mode}, as GLOW Sync")
-        self.sf = sfn.Step(mode, Org(login=client_credentials(cid, secret)), csv_path, log=self.log,
-                           retry=self.with_retry)
+        org = Org(login=client_credentials(cid, secret))
+        self.sf = sfn.Step(mode, org, csv_path, log=self.log, retry=self.with_retry)
         try:
             self.sf.prepare()
         except Exception as err:                          # the forms sync whatever happens here
             self.sf.broken = f"{err.__class__.__name__}: {str(err)[:200]}"
             self.sf.warn("not ready - no account is created or checked this run", self.sf.broken)
+        self.sf_watch(org, self.started)                  # same session: sf_finish's close() revokes it
+
+    def sf_watch(self, org, now):
+        """The attendance processor's watch (#242, after incident #238), reads only: the watched
+        Apex against glow/apex_fingerprints.json, and no Jotform batch for 48 hours on a weekday
+        (UTC). Each finding is an ATTENTION item; a check that fails is one too, never an exception.
+        The log gets counts only - never a body."""
+        checks = (("Apex", lambda: apex_attention(org)), ("batches", lambda: batch_gap_attention(org, now)))
+        for label, check in checks:
+            try:
+                items = check()
+                said = f"{len(items)} item(s)" if items else "ok"
+            except Exception as err:                      # the forms sync whatever happens here
+                items = [(f"SF: the processor watch could not check the {label} ({err.__class__.__name__})",
+                          f"{str(err)[:200]}\nNothing is known about it this run; docs/RUNBOOK.md, "
+                          "\"Attendance processor watch\".")]
+                said = f"could not check ({err.__class__.__name__})"
+            self.attention += items
+            self.log(f"  SF: watch - {label}: {said}")
+            for title, _ in items:
+                self.log(f"  ! {title}")
 
     def sf_create(self, region, plan):
         if self.sf is None:
