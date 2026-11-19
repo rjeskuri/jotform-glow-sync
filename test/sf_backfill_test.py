@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_backfill as bf                                   # noqa: E402
 from glow.private_files import Ledger                       # noqa: E402
 from glow.salesforce import CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, PARTNER_RECORD_TYPE   # noqa: E402
+from glow.sync import SPECIAL_EVENT_PREFIX                  # noqa: E402
 from helpers import fake_org                               # noqa: E402
 
 PARTNER = "001000000000000PAA"
@@ -377,6 +378,43 @@ class SalesforceBackfill(Harness, unittest.TestCase):
             ("2026-09-12", "Sunrise Club"): "name_unknown_to_roster", ("2026-09-19", "Sunrise Club"): "earlier_session_held",
             ("2026-09-26", "Sunrise Club"): "module_unresolved", ("2026-09-27", "Sunrise Club"): "module_not_usable",
             ("2026-09-28", "Sunrise Club"): "module_not_usable"})
+
+    def test_a_special_event_without_a_week_is_sent_with_a_blank_week_and_a_curriculum_module_without_one_is_held(self):
+        # ticket #244; docs/plans/2026-10-13-special-events.md, Decisions 1: a special event has no session week
+        # by design - Salesforce gets Module__c the event's text, Module_Week__c blank, Module_Year__c the year.
+        # A curriculum module without a week, an event without a usable year, and no module stay held.
+        self.org = FakeOrg([account(PARTNER, "Example Partner", PARTNER_RECORD_TYPE, None), account(SUNRISE, "Sunrise Club"),
+                            account(RIVER, "River Club"), account(PILOT, "Pilot Club")])
+        idg, welcome = SPECIAL_EVENT_PREFIX + "IDG Celebrations", SPECIAL_EVENT_PREFIX + "Welcome Session"
+        self.write([row("1", date="2026-10-03", module=idg, week=None, year="1"),
+                    row("2", date="2026-10-10", module=idg, week="  ", year=""),                  # an event without a year
+                    row("3", club="River Club", date="2026-10-17", module=welcome, week="", year="2"),
+                    row("4", club="River Club", date="2026-10-24", module="Self Advocacy", week="", year="1"),
+                    row("5", club="Pilot Club", date="2026-10-03", module=idg, week=" ", year="3"),
+                    row("6", club="Pilot Club", date="2026-10-10", module="Special Event Planning", week=None, year="1"),
+                    row("7", club="Pilot Club", date="2026-10-17", module=" ", week=None, year="1")])
+        _, sessions, held = self.plan()
+        self.assertEqual({h["key"]: h["reasons"] for h in held},
+                         {f"{SUNRISE}|2026-10-10": "module_not_usable", f"{RIVER}|2026-10-24": "module_not_usable",
+                          f"{PILOT}|2026-10-10": "module_not_usable", f"{PILOT}|2026-10-17": "module_not_usable"})
+        self.assertEqual(sorted(s["key"] for s in sessions),
+                         sorted([f"{SUNRISE}|2026-10-03", f"{RIVER}|2026-10-17", f"{PILOT}|2026-10-03"]))
+        out, stop = self.send()
+        self.assertIsNone(stop, stop)
+        sent = {(b["Account_Name__c"], b["Attendance_Date__c"]): b for b in self.org.inserts}
+        self.assertEqual(len(self.org.inserts), 3)
+        for where, (module, year) in {("Sunrise Club", "2026-10-03"): (idg, 1), ("River Club", "2026-10-17"): (welcome, 2),
+                                      ("Pilot Club", "2026-10-03"): (idg, 3)}.items():
+            with self.subTest(where):
+                body = sent[where]
+                self.assertIn("Module_Week__c", body)
+                self.assertEqual((body["Module__c"], body["Module_Week__c"], body["Module_Year__c"]), (module, None, year))
+                self.assertEqual(sorted(body["Contact_IDs__c"].split(", ")), sorted(GIRLS))
+        self.assertEqual(self.states(), ["sending", "ok"] * 3)
+        for batch in self.org.batches:
+            self.assertEqual((batch["Processing_Status__c"], batch["Girls_Present__c"],
+                              sum(1 for r in self.org.rows if r["Attendance_Batch__c"] == batch["Id"])), ("Success", 3, 3))
+        self.assertEqual([r["rows"] for r in self.ledger() if r["status"] == "ok"], ["3"] * 3)
 
     # ---- send
     def test_dry_run_sends_nothing_and_apply_sends_in_order_and_is_safe_to_repeat(self):
