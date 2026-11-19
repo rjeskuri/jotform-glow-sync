@@ -3665,7 +3665,8 @@ sharing stays as it is"):
   6. Check after: retrieve again into a dated folder (as `after/`) and compare with the edited
      copy. Run one changed report through the Analytics API, and compare its totals with SOQL.
 
-**Refreshing through the API** (the PUT is gated by the live gate: Ryan's go): `sf api request rest
+**Refreshing through the API** (since #204 the PUT with an empty body passes the live gate with no
+prompt; with `?filter1=` in the path it is judged as a write): `sf api request rest
 '/services/data/v62.0/analytics/dashboards/01ZRP00000BE2TR2A1' -o glow -X PUT -b '{}'`.
 - One partner's view: put `?filter1=<option id>` in the path. A `filters` list in the body is
   ignored, and each partner's view has its own cached results.
@@ -5731,6 +5732,18 @@ writes go through without a prompt"):
   is the go), and is refused where no prompt can show: a command that is chained
   or prefixed, a tool on no list, plan mode (a hook's `allow` has no effect
   there). `GLOW_LIVE_OK` grants nothing (DECISIONS 2026-10-14).
+- What changes no record and no metadata passes with no prompt and no backup, in
+  the same modes and from a subagent (ticket #204): a dashboard refresh (`sf api
+  request rest /services/data/vNN.N/analytics/dashboards/<id> -X PUT`, with no
+  body or `-b '{}'`) and a GET of the dashboard or its `/status`; a check-only
+  deploy (`sf project deploy start --dry-run` or `sf project deploy validate`,
+  with `-d`, `-x` or `-m`); and `sf data query` (an `--output-file` only inside
+  `data/`). Each is logged `PASSED`, with no notification. It passes only as one
+  plain command whose every flag the hook knows, with no `--apply` or
+  `--rehearse` in it: a chain, a pipe, a redirect, a wrapper, another body,
+  method, path or flag, `deploy quick`, `--metadata-dir` or a request from a file
+  is judged as above, and a destructive deploy asks. `sf apex run` gets no pass:
+  a dry run cannot be told from its file.
 
 Live:
 
@@ -5740,7 +5753,7 @@ Live:
 - the raw APIs the tools wrap: `api.jotform.com`, the Sheets writes
   (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`);
 - Salesforce through `sf` or `sfdx`: a deploy (`project deploy
-  start|quick|validate`, a check-only one too; `deploy metadata`), `project
+  start|quick|validate`, a check-only one too unless it is plain, above; `deploy metadata`), `project
   delete source`, `data create|update|delete|upsert|import`, `apex run`, the
   `force:` apex, source, mdapi and data commands, the REST API itself
   (`.salesforce.com/services/`), `sf api request graphql`, and `sf api request
@@ -5896,7 +5909,13 @@ prompt was shown only in an interactive session: a headless run's ask is logged
 `.claude/settings.json` backs the hook with `ask` rules on the deletes only (`sf
 data delete`, `sf project delete source`, `gh variable|secret delete|remove`):
 a hook's `allow` does not get past an `ask` rule, so the families with an
-automatic go have none. In `dontAsk` only allow-listed commands run, so the
+automatic go, and #204's passes, have none. Its `Read` `ask` rules stand on the
+personal data only (Ryan, 2026-11-05; DECISIONS 2026-11-05): every file at the
+top of `data/` and directly in one of its folders, all of the folders that hold
+personal data (`auto_sync/`, `backfill_*`, `live_*`, `sf_dupes_*` and the others
+listed there), and all of `backups/`; a Salesforce plan's `before/`, `build/`
+and `after/` ask nothing. `HARNESS_SENSITIVE_PATHS` marks the same paths, with
+`credentials/` and `.env`. In `dontAsk` only allow-listed commands run, so the
 backups a headless run takes have `allow` rules: `backup_forms.py`, `sheets_client.py
 export` and `export-all`, `github_switches.py backup` and `sf project retrieve
 start`. It also has `onFailure: block`, so a hook that fails
