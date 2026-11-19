@@ -5254,7 +5254,8 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   the full stories:** open the report, the arrow beside Edit → Export → **Details Only**, Format
   "Comma Delimited .csv", Export (the .xlsx format was not tested). Proved 2026-11-19 (#201, lengths only): the Details
   Only .csv of 421 rows kept every story whole, its longest story per column equal to SOQL's
-  (4,065, 4,039, 4,372 and 4,770 characters), where the Reports API run of the same 421 rows
+  over the 2026 reports with its filters, U.S partners included (468 rows: 4,065, 4,039, 4,372
+  and 4,770 characters), where the Reports API run of the same 421 rows
   stops at 257. A spreadsheet cell holds 32,767 characters, far above the longest story.
 - The approval overview (#200) is the new report "Approval Status by Month"
   (`00ORP000009p0qb2AA`, `Approval_Status_by_Month`, in "GLOW Monthly Reports") shown on D5 as a
