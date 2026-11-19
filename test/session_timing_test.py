@@ -1052,6 +1052,15 @@ class TimingReportsDocs(unittest.TestCase):
     NO_LITERAL_PERIOD = ("no literal month, week or date (`Session_Month__c = '2026-09'`, `Attendance_Date__c = 2026-09-01`): the "
                          "report's window is relative",
                          r"\bSession_(?:Month|Week)__c\s*(?:=|!=|<>|LIKE\b|IN\b|NOT\s+IN\b)|\bAttendance_Date__c\s*(?:=|>=?|<=?)\s*\d{4}-\d{2}")
+    # the delay report alone may carry its floor, exactly `Attendance_Date__c >= 2026-09-01` (Ryan 2026-10-26 on #103:
+    # session dates from 2026-09-01; #103's Rollout adds it to the check once deployed); any other literal date or
+    # period, on it or on another report, is still refused
+    FLOOR = r"\bAttendance_Date__c\s*>=\s*2026-09-01\b(?![T:])"
+    NO_LITERAL_PERIOD_BUT_FLOOR = (
+        "no literal month, week or date (`Session_Month__c = '2026-09'`, `Attendance_Date__c <= 2026-10-31`) but the floor "
+        "`Attendance_Date__c >= 2026-09-01`: the report's window is relative",
+        r"\bSession_(?:Month|Week)__c\s*(?:=|!=|<>|LIKE\b|IN\b|NOT\s+IN\b)|"
+        r"\bAttendance_Date__c\s*(?!>=\s*2026-09-01\b(?![T:]))(?:=|>=?|<=?)\s*\d{4}-\d{2}")
     FORBIDDEN = {
         "Clubs_Not_Submitting_Last_Week": (
             ("no `Processing_Status__c` or `Creator__c` in the subquery (a batch of any status, by anyone, counts as submitted)",
@@ -1062,7 +1071,10 @@ class TimingReportsDocs(unittest.TestCase):
             NO_LITERAL_PERIOD,
         ),
         "Late_Submissions_Last_Month": (NO_LITERAL_PERIOD,),
-        "Submission_Delay_by_Partner_by_Month": (NO_LITERAL_PERIOD,),
+        "Submission_Delay_by_Partner_by_Month": (
+            NO_LITERAL_PERIOD_BUT_FLOOR,
+            ("the floor once (`Attendance_Date__c >= 2026-09-01` at most one time)", rf"(?:{FLOOR}).*(?:{FLOOR})"),
+        ),
     }
     # the Parent.Name exclusion's names: inside `Parent.Name NOT IN (...)`, or each `Parent.Name != '...'`
     EXCLUSION = re.compile(r"\bParent\.Name\s+NOT\s+IN\s*\(([^)]*)\)|\bParent\.Name\s*(?:!=|<>)\s*('(?:[^'\\]|\\.)*')")
@@ -1292,11 +1304,23 @@ class TimingReportsDocs(unittest.TestCase):
 
 
 # Ticket #103: the three reports the new dashboard components read (`Submissions_by_Club_and_Week` stays
-# off the dashboard), the folder of the build (`data/sf_session_timing_2026-10-26/`: `dashboard_before/`
+# off the dashboard), the folder of the build (`data/sf_session_timing_2026-11-19/`: `dashboard_before/`
 # is the fresh retrieve, `after/` the read-back; never committed, so only what the docs say of it is
-# tested) and the dashboard's DeveloperName
+# tested) and the dashboard's DeveloperName. The dashboard changed on 2026-11-18 (#222, #231), so the
+# build was redone from a fresh retrieve of 2026-11-19; the 2026-10-26 retrieve is superseded (DECISIONS
+# 2026-10-16: never an older build) and counts as another change's folder (OTHER_CHANGE).
 DASH_REPORTS = ("Clubs_Not_Submitting_Last_Week", "Late_Submissions_Last_Month", "Submission_Delay_by_Partner_by_Month")
-DASH_FOLDER = "sf_session_timing_2026-10-26"
+DASH_FOLDER = "sf_session_timing_2026-11-19"
+# a folder said to be superseded, older or never used (the docs may name the 2026-10-26 retrieve so)
+SUPERSEDED = (r"(?i)\bsupersed\w*|\bpredat\w*|\bnever used\b|\bnot used\b|\bunused\b|\bolder\b|\bearlier\b|\bstale\b|"
+              r"\bobsolete\b|\bdiscarded\b|\breplaced\b|\bout of date\b")
+
+
+def names_job_folder(text):
+    """The sentences of `text` (flattened, prose()) that name `data/{DASH_FOLDER}/` as #103's own folder: the
+    name not negated in its clause, and the sentence not calling it superseded, older or never used."""
+    pattern = re.compile(re.escape(DASH_FOLDER) + r"(?![\w-])")
+    return [s for s in sentences(text, ".;") if affirmed(s, pattern) and not re.search(SUPERSEDED, s)]
 DASHBOARD = "Jotform_Attendance_test"
 # `--dry-run` said of a check-only or validation, or inside the deploy command itself
 CHECK_ONLY = re.compile(r"(?i)(?:check-only|\bvalidat\w*)[^.]{0,120}?--dry-run|--dry-run[^.]{0,120}?(?:check-only|\bvalidat\w*)|"
@@ -1414,12 +1438,13 @@ class DashboardTimingDocs(unittest.TestCase):
     weeks, in digits or words ("over seven days", "more than a week"), a metric that counts the late ones,
     or a header "Late ..." (quoted, in backticks, bold, or after "titled", "headed", "called").
 
-    Its Rollback for #103 redeploys only the dashboard, from `data/sf_session_timing_2026-10-26/dashboard_before/`,
-    check-only first and on Ryan's go, and only after a fresh retrieve equals #103's own read-back
-    (`data/sf_session_timing_2026-10-26/after/`, or `after/` in a sentence that names no other change) - a
+    Its Rollback for #103 redeploys only the dashboard, from `data/sf_session_timing_2026-11-19/dashboard_before/`
+    (the job folder, named as #103's own and not as superseded), check-only first and on Ryan's go, and only
+    after a fresh retrieve equals #103's own read-back
+    (`data/sf_session_timing_2026-11-19/after/`, or `after/` in a sentence that names no other change) - a
     difference stops it (no "anyway", "proceed", "ignore the difference"), and the rollback is built from
     the fresh retrieve; never an older package (DECISIONS 2026-10-16), so another change's folder
-    (`sf_girls_tiles_2026-10-20`, #59, #35) appears only where it is denied or named as the older package
+    (`sf_girls_tiles_2026-10-20`, the superseded retrieve `sf_session_timing_2026-10-26`, #59, #35) appears only where it is denied or named as the older package
     never used; no deploy sentence also redeploys a report, a field, a permission set or a folder other
     than `dashboard_before/`; #102's reports stay (the archive rule: nothing deleted), and a sibling
     dashboard, when there is one, is retired with it. The plan's "## Task #103" carries Build (what `build/`
@@ -1811,6 +1836,8 @@ class DashboardTimingDocs(unittest.TestCase):
         """#103's rollback in `text` (flattened, prose()): `sibling` says the sibling dashboard is named beside it."""
         said = sentences(text, ".;")
         self.assertIn(DASH_FOLDER, text, f"{where}: name the folder `data/{DASH_FOLDER}/` the rollback deploys from")
+        self.assertTrue(names_job_folder(text), f"{where}: name `data/{DASH_FOLDER}/` as #103's own folder, in a sentence "
+                                                "that does not call it superseded, older or never used")
         self.assertIn(DASHBOARD, text, f"{where}: name the dashboard `Attendance/{DASHBOARD}`")
         self.assertTrue(affirmed(text, near(r"\b(?:re)?deploy\w*", r"dashboard_before\b")),
                         f"{where}: the dashboard is redeployed from `data/{DASH_FOLDER}/dashboard_before/` (said of the "
@@ -1950,6 +1977,11 @@ class DashboardTimingDocs(unittest.TestCase):
             self.assertIn(DASH_FOLDER, task, f"{name}: Task #103: name the folder `data/{DASH_FOLDER}/` that holds "
                                              "`dashboard_before/`, `build/` and `after/`")
             build = prose(flat(parts["### Build"]))
+            # ... as the Build's own folder: a mention that calls it superseded, older or never used (as the 2026-10-26
+            # retrieve is) does not count
+            self.assertTrue(names_job_folder(build),
+                            f"{name}: Task #103 Build: say the build is in `data/{DASH_FOLDER}/` (the fresh retrieve of "
+                            "2026-11-19), in a sentence that does not call that folder superseded, older or never used")
             for what, pattern in (("`build/`", r"(?<!\w)build/"), ("the fresh retrieve `dashboard_before/`", r"dashboard_before\b"),
                                   (f"the dashboard `{DASHBOARD}`", DASHBOARD),
                                   *((f"the report `{r}` (a component reads it)", re.escape(r)) for r in DASH_REPORTS),
