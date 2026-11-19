@@ -5225,8 +5225,8 @@ Rollback of #197 ([plan](plans/2026-11-02-sf-review-implementation.md#rollback);
 ### GLOW Club Reporting
 
 The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
-Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18, and since #200 the approval
-overview chart. Item 19 is the table, on no dashboard. Ticket #79,
+Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18, since #200 the approval
+overview chart and since #119 the on-time chart. Item 19 is the table, on no dashboard. Ticket #79,
 [plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
 (`0AfRP000002i7330AA`) from `data/sf_dash_reporting_2026-10-24/build/`, read back into `after/`
 and checked against SOQL (the plan's Result).
@@ -5236,6 +5236,12 @@ Ticket #200 (epic #194, GLOW's review of 2026-11-02;
 items 17-19 copied to Decommissioned the same day (`copy --tag "#200"`), and live on Ryan's go
 (deploy `0AfRP000002j9lx0AA`, check-only `0AfRP000002j9kL0AQ`, 09:03 UTC), read back into
 `after/` and checked against SOQL ([Result](plans/2026-11-02-sf-review-reporting.md#result)).
+Ticket #119 (epic #68, Ryan's request of 2026-11-02; [plan](plans/2026-11-20-sf-on-time.md);
+DECISIONS 2026-11-20): retrieved live 2026-11-20 into `data/sf_on_time_2026-11-20/before/`, item 18
+copied to Decommissioned the same day, and live (deploy `0AfRP000002keu90AA`, check-only
+`0AfRP000002kesX0AQ`, 2026-11-19 16:44 UTC; the field's fix deploy `0AfRP000002kexN0AQ`, 16:47
+UTC), read back into `after/` and checked against SOQL
+([Result](plans/2026-11-20-sf-on-time.md#result)).
 
 D5 and its reports show 2026 only, no 2025 month (GLOW's review), until the reporting year moves
 on 15 February 2027 (#195).
@@ -5245,10 +5251,21 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   (`00ORP000006XXEf2AO`; "Approved Approvals monthly report" until #200, GLOW's name since, the
   Id unchanged): the Monthly Reports with `Approved__c` ticked, a record count. Its D5 table is
   titled the same.
+- The on-time field (#119) is `DHIS2__c.Submitted_On_Time__c`, "Submitted On Time", a text
+  formula: it reads "On time" when the Monthly Report's `Monthly_Report_submission_date__c` is on
+  or before the 15th of the month after its `Period__c` (December's report: by 15 January), and
+  "Late" when it is later. A Monthly Report with a blank `Monthly_Report_submission_date__c` or a
+  blank `Period__c` gets no value: `Submitted_On_Time__c` is blank too, neither "On time" nor
+  "Late". The submission date is the date the record was created, in GMT. Read access only,
+  for the profiles Admin and GLOW Standard User, as #195's fields; the report type `Dhis2` offers
+  it next to the submission date. The rule is Ryan's and GLOW's (DECISIONS 2026-11-20). Until
+  #119 no report computed "on time": the hold of 2026-10-23 was lifted on 2026-11-02.
 - Item 18, GLOW's "Report submitted on time", is the report "Reports completed on time"
-  (`00ORP0000054DyH2AU`): the Monthly Reports filed, a record count, with each one's
-  `Monthly_Report_submission_date__c` and `Monthly_Report_Modified_Date__c` as columns. No report
-  computes "on time" yet (#119, on hold).
+  (`00ORP0000054DyH2AU`, the Id unchanged): the Monthly Reports filed, a record count, grouped by
+  Partner (`Account__c`) and Month (`Period__c`), with each one's
+  `Monthly_Report_submission_date__c`, `Submitted_On_Time__c` (the column #119 added) and
+  `Monthly_Report_Modified_Date__c` as columns, so it shows on time versus late per partner and
+  month. Its D5 table keeps the partner and month rows with their counts.
 - Item 19, GLOW's "GLOW of the Month Stories", is the report "GLOW of the Month Stories Report"
   (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
   support, community impact, success story, personal growth). Its "Formatted Report" export cuts
@@ -5266,6 +5283,19 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   reporting year: `SELECT CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c), Approved__c`.
   Since #209 add `AND Account__r.Name NOT IN (<the U.S partners' names>)` for it to equal the
   overview ("The U.S partners", at the top of this section).
+- The on-time overview (#119) is the new report "On Time by Month" (`00ORP000009taVV2AY`,
+  `On_Time_by_Month`, in "GLOW Monthly Reports") shown on D5 as a stacked column
+  (`ColumnStacked`), "Monthly Reports Submitted On Time vs Late by Month", full width below the
+  approval overview (row 18, 12 columns, 8 rows), mapped on both dashboard filters, Partner
+  Manager and Month: the Monthly Reports submitted on time versus late, by month. The report is a
+  summary report grouped by `Period__c` by calendar month, then by `Submitted_On_Time__c`, a
+  record count, with the filters of "Approval Status by Month" as they are live since #209: the
+  reporting year, the account not blank, the account name not containing "test", not one of the
+  six U.S partners. SOQL signal, every month of the reporting year: `SELECT
+  CALENDAR_MONTH(Period__c), COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND
+  Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name NOT IN (<the U.S
+  partners' names>) AND Submitted_On_Time__c = 'On time' GROUP BY CALENDAR_MONTH(Period__c)`, and
+  the same with `'Late'` (SOQL groups by no formula field).
 
 How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - Since #200 each report, items 17, 18 and 19, filters `In_Reporting_Year__c equals true` (#195),
@@ -5290,7 +5320,8 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - The dashboard filters on Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`), so
   each manager picks their own partners (Ryan, 2026-10-24 on #79). Since #200 (GLOW's review, Ryan
   2026-11-02) the dashboard D5 has a Month filter on `DHIS2__c$Month__c` beside it: 12 `equals`
-  options, January to December, mapped on all three components. Until #200 Partner Manager was
+  options, January to December, mapped on all three components (on all four since #119, the
+  on-time chart mapped on both filters). Until #200 Partner Manager was
   its only filter and it had no Month filter (Ryan, 2026-10-24, for every Monthly Report
   dashboard; DECISIONS 2026-10-24). It has no Partner filter.
 - Until #200 the Partner Manager filter offered 7 managers: the 6 it had offered plus the active
@@ -5301,7 +5332,8 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
   Approval Status" (item 17; "Approved Approvals monthly report" until #200) and "Reports
   completed on time", each a row per partner and month with its count and its totals, which #200
   leaves as they were (GLOW asked nothing about them), and since #200 the overview's stacked
-  column below them (row 10, 12 columns wide, 8 rows high). The two tables took the place of the
+  column below them (row 10, 12 columns wide, 8 rows high), and since #119 the on-time stacked
+  column below that (row 18, the same size, on both filters). The two tables took the place of the
   one component before #79, on "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), one of
   the 19 reports held in "DHIS2 Reports", which moves to Decommissioned once the dashboard no
   longer uses it.
@@ -5347,6 +5379,19 @@ later moves these figures):
   asked true; a stacked column keeps no values printed on its bars, as on D2's stacked charts),
   and it added the default `sortLegendValues` false.
 
+#119's check (2026-11-19 16:47 UTC, 2026-11-20 on the Mac's clock, after the fix deploy and D5's
+refresh; a Monthly Report filed later moves these figures):
+- All 4 components of D5 return data; no grouping label of the on-time chart contains 2025 (0 of
+  10).
+- `Submitted_On_Time__c` equals the rule computed apart from the two dates on all 470 Monthly
+  Reports of the reporting year (0 differ).
+- The on-time chart equals the SOQL signal above in every month, on time / late: January 25/15,
+  February 36/5, March 39/3, April 34/8, May 38/4, June 41/1, July 33/9, August 37/8, September
+  36/7, October 37/5.
+- Ryan's figures of 2026-11-02, 37 of 45 September and 38 of 46 August reports on time, are
+  reproduced exactly with the test-record rule alone; the chart's 36 of 43 and 37 of 45 leave out
+  the U.S partners' reports since #209 (two in September, one on time; one in August, on time).
+
 Rollback, each step on Ryan's go:
 - The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
   made before the change), as Decommissioned (above) says. Since #200 they come back by a deploy,
@@ -5389,6 +5434,26 @@ Rollback of #200 ([plan](plans/2026-11-02-sf-review-reporting.md#rollback); DECI
 - The new report "Approval Status by Month" (`00ORP000009p0qb2AA`) is not in `before/`: D5's
   redeploy takes it off the dashboard first, as D5 in `before/` has no component on it, and then
   it moves to Decommissioned (the archive rule above). Nothing is deleted.
+
+Rollback of #119 ([plan](plans/2026-11-20-sf-on-time.md#rollback); DECISIONS 2026-10-16), each
+write on Ryan's go after a check-only, VPN off:
+- Since #119's deploy a fresh retrieve of D5 and item 18 no longer equals #200's `after/`, so #200's
+  rollback above runs only after this one.
+- D5 is redeployed without the on-time chart: by deploying only its own file in #119's retrieve
+  `data/sf_on_time_2026-11-20/before/`, only while a fresh retrieve of it equals `after/`
+  (nothing has changed it since #119's deploy), or a fresh retrieve of it with the fourth
+  component taken out, never from an older build or retrieve.
+- Item 18 comes back the same way, without its `Submitted_On_Time__c` column, in the same deploy as
+  D5: its file in that `before/`, only while a fresh retrieve of it equals `after/`, or a fresh
+  retrieve of it edited back. Its copy in Decommissioned (`00ORP000009taGz2AI`, made before the
+  change, the description "copy of 00ORP0000054DyH2AU, ticket 119") is the record of what it was.
+- The new report "On Time by Month" (`00ORP000009taVV2AY`) is not in `before/`: D5's redeploy
+  takes it off the dashboard first, as D5 in `before/` has no component on it, and then it moves
+  to Decommissioned (the archive rule above).
+- The field `Submitted_On_Time__c`, its `Dhis2` column and its read access stay: a formula field
+  no report reads is harmless (as #195's plan says of its fields). Removing them is a destructive
+  change of its own, from a fresh retrieve, on Ryan's go.
+- Nothing is deleted.
 
 ### GLOW Club Training
 

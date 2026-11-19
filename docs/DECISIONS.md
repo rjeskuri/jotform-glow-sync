@@ -972,3 +972,13 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Until Ryan pushes the script and runs `installTriggers` once, the menu is still the only way. After that the window is up to an hour, during which the Club Roster Form can still offer a retired club; the menu closes it at once.
   - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
   - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".
+
+### 2026-11-20 — A Monthly Report is on time when filed by the 15th of the month after (#119)
+
+- **The rule:** a Monthly Report (`DHIS2__c`) is on time when its `Monthly_Report_submission_date__c` is on or before the 15th of the month after its `Period__c` (December's report: by 15 January of the next year).
+- The rule is Ryan's and GLOW's decision of 2026-11-02 (the hold on #119 lifted the same day): GLOW's review asked for a summary chart of the partners who submitted on time versus not, by month, beside item 18's partner-level list.
+- **The field:** `DHIS2__c.Submitted_On_Time__c` ("Submitted On Time"), a text formula that reads "On time" or "Late" by the rule; the report "On Time by Month" and item 18 ("Reports completed on time") read it, and D5 shows the report as a stacked column (RUNBOOK "GLOW Club Reporting"). Ticket #119, [plan](plans/2026-11-20-sf-on-time.md).
+- **A blank date:** a Monthly Report with a blank `Monthly_Report_submission_date__c` or a blank `Period__c` gets no value: `Submitted_On_Time__c` is blank too, neither "On time" nor "Late" (a Ruling of the build, not GLOW's). The submission date is the record's creation date and is never blank; 6 of the 1,097 Monthly Reports have no `Period__c` (2026-11-20), none of them in the reporting year, so no chart counts them.
+- **The date compared:** `Monthly_Report_submission_date__c` is a date formula on `CreatedDate`, the creation's date in GMT: a report filed on the evening of the 15th in the Americas can already be the 16th in GMT, and Late.
+- **Why:** the 15th is when GLOW expects the reports (they come in between the 5th and about the 15th of the next month, plan of #195); a field rather than a report formula, so one value serves the chart, item 18's column and any later report.
+- **Rejected:** a report-level formula (one per report, and a summary formula cannot group a stacked column); a rule in the partner's own time zone (the record has none).

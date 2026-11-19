@@ -1721,7 +1721,9 @@ class ReportingDashboardDocs(unittest.TestCase):
         self.assertFalse(others, f"{where}: the rollback restores from this change's `data/sf_dash_reporting_<date>/` "
                                  f"only (or the copy tool's ledger folder), never another retrieve, build or backup: "
                                  f"{others}")
-        fallback = [s for s in sentences(flat(raw), ".;") if self.FALLBACK.search(s) and not self.STOP.search(s)]
+        # a fallback is said of a restore: since #119 the part defines a formula ("… otherwise \"Late\""), no fallback
+        fallback = [s for s in sentences(flat(raw), ".;") if self.FALLBACK.search(s) and self.RESTORE.search(s)
+                    and not self.STOP.search(s)]
         self.assertFalse(fallback, f"{where}: no fallback to another source (if `before/` is missing or differs, stop "
                                    f"and ask; never deploy anything else): {[s[:160] for s in fallback]}")
         self.sweep(raw, where, rollback=True)
@@ -1736,6 +1738,9 @@ class ReportingDashboardDocs(unittest.TestCase):
         # since #200 (GLOW's review, Ryan 2026-11-02) its own retrieve, `data/sf_glow_review_<month>/<topic>/`
         # (GlowReviewReportingDocs checks that #200's rollback names no other change's folder)
         if re.match(r"data/sf_glow_review_(\d{4}-\d\d|<month>)(?![\w-])", p):
+            return False
+        # since #119 (on-time Monthly Reports) its own retrieve, `data/sf_on_time_<date>/`, in #119's rollback
+        if re.match(r"data/sf_on_time_(\d{4}-\d\d(-\d\d)?|<date>|<month>)(?![\w-])", p):
             return False
         if re.match(r"(tools|docs|plans|scripts|glow|test)/", p) or re.search(r"\.(py|md|sh|csv)$", p):
             return p.startswith(("data/", "backups/"))
@@ -8064,12 +8069,15 @@ class GlowReviewReportingDocs(unittest.TestCase):
     # --- #200's rollback, in the plan and in the RUNBOOK (review of #200) -------------------------------------
 
     def runbook_rollback(self):
-        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end."""
+        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end,
+        or to the next change's rollback (since #119, "Rollback of #119" follows it)."""
         part = self.r.part()
         m = re.search(r"(?im)^\W*rollback\b[^\n]*#200\b", part)
         self.assertTrue(m, f"RUNBOOK section {ReportingDashboardDocs.PART[4:]!r}: no rollback of #200 (a paragraph "
                            "starting `Rollback of #200`)")
-        return part[m.start():]
+        rest = part[m.start():]
+        nxt = re.search(r"(?im)^\W*rollback\s+of\s+#(?!200\b)\d+", rest[1:])
+        return rest[:nxt.start() + 1] if nxt else rest
 
     def assertRollbackOf200(self, raw, where):
         """#200's rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's
