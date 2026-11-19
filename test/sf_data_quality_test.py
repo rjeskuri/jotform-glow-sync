@@ -47,9 +47,19 @@ rule unchanged, the counts (0 groups, 0 cross-type, 0 sets), and is not `done` w
 batch check (step 8) is pending. Every part a test reads is swept for what would
 contradict the rules (contradictions()): the rule set to Alert or Block (said any way, unless denied
 where it is said, without a time limit) or stopping a save in other words (a halt, pop-up, message,
-prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way),
-a softener on the proof, the check-only, the go or the read-back. Counts and ids only: no figure
-from the org is pinned.
+prompt, refusal), a flagged record deleted, merged, hidden or kept out of the reports (said any way)
+or its attendance no longer counting, a softener on the proof, the check-only, the go or the read-back.
+Counts and ids only: no figure from the org is pinned.
+
+The one exception (#216; Ryan, 2026-11-18: retired clubs must not "show up or impact reporting in
+salesforce"; DECISIONS 2026-11-18 amends 2026-10-21): the four not-submitted lists
+(`Clubs_Not_Submitting_Last_14_Days`, `_Since_1_Sept`, `_Last_Week`,
+`Jotform_Clubs_No_Attendance_Last_Month`) carry a locked filter `Account.Obsolete_Record__c` equals false
+(deploys 0AfRP000002kRqT0AU and 0AfRP000002kSo90AE). The sweep reads it only in a clause that names
+those lists and the obsolete flag, leaves out rather than deletes or merges, and names no duplicate, no
+other report, dashboard or list and no Contact; every other report and dashboard still shows flagged
+records and their attendance still counts. The RUNBOOK section and the 2026-11-18 entry state the
+exception with that scope, and the 2026-10-21 entry gets a dated bullet pointing at it.
 
 DuplicateAccountGroups: glow.salesforce.duplicate_account_groups(accounts), the Python side of the
 Account matching rule for the read-back and the monthly check - the groups of Accounts the rule
@@ -128,8 +138,12 @@ class DuplicateRuleDocs(unittest.TestCase):
                          r"[\"”]|\b(duplicate|obsolete)s?\s+(?!rules?\b)(\w+\s+){0,2}?(records?|accounts?|contacts?|"
                          r"girls?|partners?|clubs?|rows?)\b")
     REMOVAL = re.compile(r"(?i)\bdelet\w*|\bmerg\w*|\bpurg\w*|\beras\w*|\bwip(e|es|ed|ing)\b|\bdestroy\w*|"
-                         r"\brecycle bin\b|\bremov\w*|\bexclud\w*|\bleft out\b|\bleaves? out\b|\bhid(e|es|den|ing)\b|"
-                         r"\bdrop\w*|\bfilter(ed|s)? out\b|\bomit\w*|\bclean\w* (up|out)\b")
+                         r"\brecycle bin\b|\bremov\w*|\bexclud\w*|\bleft\s+(\w+\s+){0,2}?out\b|\bleav(e|es|ing)\s+(\w+\s+){0,2}?out\b|"
+                         r"\bhid(e|es|den|ing)\b|\bdrop\w*|\bfilter(ed|s)? out\b|\bomit\w*|\bclean\w* (up|out)\b|"
+                         r"\b(kept|keeps?|keeping)\s+(\w+\s+){0,2}?(out|off)\b")
+    # what never becomes the exception below: a record deleted, merged or destroyed (only a list may leave one out)
+    DESTRUCTIVE = re.compile(r"(?i)delet\w*|merg\w*|purg\w*|eras\w*|wip(e|es|ed|ing)|destroy\w*|recycle bin|remov\w*|"
+                             r"drop\w*|clean\w* (up|out)")
     # removing a field or a flag itself is not removing a record
     FIELD_OR_FLAG = re.compile(r"(?i)\b(delet|remov)\w*\s+(the\s+|an?\s+|its\s+|their\s+|both\s+|all\s+|four\s+|new\s+|"
                                r"each\s+|every\s+)*(\w+\s+){0,3}?(fields?|flags?|checkbox(es)?)\b|"
@@ -153,8 +167,40 @@ class DuplicateRuleDocs(unittest.TestCase):
     # flagged records kept out of the reports, said in other words (the phrases are the hiding: a negation
     # before them does not make them a denial, but for "filtered out" and "= false")
     HIDDEN = re.compile(r"(?i)\bdoes not appear\b|\bnot appear\b|\bkeeps? only\b|\bonly clean\b|=\s*false\b|"
-                        r"\bunflagged only\b|\bfiltered out\b")
-    HIDDEN_DENIABLE = re.compile(r"(?i)\bfiltered out\b|=\s*false\b")
+                        r"\bequals?\s+false\b|!=\s*true\b|\bnot equal to\s+true\b|\bunflagged only\b|\bfiltered out\b")
+    HIDDEN_DENIABLE = re.compile(r"(?i)\bfiltered out\b|=\s*false\b|\bequals?\s+false\b|!=\s*true\b|\bnot equal to\s+true\b")
+    # a flagged record's attendance said to stop counting
+    COUNTED = re.compile(r"(?i)\battendance\b|\bbatch(es)?\b|\btotals?\b|\bGirls Attended\b")
+    UNCOUNTED = re.compile(r"(?i)\b(no longer|stops?|stopped|ceases?|ceased)\s+(to\s+)?(be\s+)?count\w*|"
+                           r"\b(not|never)\s+(be\s+|been\s+|get\s+)?count(s|ed|ing)?\b|\b(does|do|did)\s*n['’]t\s+count\b|"
+                           r"\bout of (the |every |all |its |their )?(totals?|counts?|figures?)\b")
+    # the one exception (Ryan, 2026-11-18, #216; DECISIONS 2026-11-18): the four not-submitted lists leave out the Club
+    # accounts flagged `Obsolete_Record__c`. It holds only in a clause that names those lists (the phrase or a report's
+    # API name or label) and the obsolete flag, says no record is deleted or merged, and names no duplicate, no other
+    # flag, no other report, dashboard, total or list, and no Contact, girl or partner
+    LIST_API = ("Clubs_Not_Submitting_Last_14_Days", "Clubs_Not_Submitting_Since_1_Sept", "Clubs_Not_Submitting_Last_Week",
+                "Jotform_Clubs_No_Attendance_Last_Month")
+    FOUR_LISTS = (r"Last_14_Days|Last 14 Days", r"Since_1_Sept|Since 1 Sept", r"Last_Week|Last Week",
+                  r"No_Attendance_Last_Month|No Attendance Last Month")
+    NOT_SUBMITTED = re.compile(r"(?i)\bnot[- ]submitt(ed|ing) lists?\b|\blists? of (the )?clubs not submitting\b|"
+                               + "|".join(LIST_API) + r"|(?-i:Clubs Not Submitting -|Clubs With No Attendance Last Month)")
+    # the lists' names read as no denial ("the not-submitted lists leave out ..." is not "not ... leave out"), nor does
+    # "no attendance" or "no batch" (what makes a club obsolete)
+    LIST_WORDS = re.compile(r"(?i)\bnot[- ]submitt\w*|\bClubs Not Submitting\b|\bNo Attendance Last Month\b|"
+                            r"\b(no|without)\s+(an?\s+)?(attendance|batch(es)?|Monthly Reports?|parent|partner|submission)\b")
+    OBSOLETE = re.compile(r"Obsolete_Record__c|(?i:\bobsolete\b)|[\"“]Obsolete Record[\"”]")
+    DUPLICATE = re.compile(r"(?i)duplicat\w*")
+    # "flagged" is the obsolete flag only when it says so ("flagged obsolete", "obsolete-flagged")
+    BARE_FLAGGED = re.compile(r"(?i)(?<!obsolete-)(?<!obsolete )\bflagged\b(?!\s+(`?\w*Obsolete_Record__c|obsolete\b|[\"“]Obsolete))")
+    DEPLOY_PAREN = re.compile(r"\([^()]*\b0Af\w{15}\b[^()]*\)")       # a deploy's bookkeeping: "(deploy 0Af…, three reports)"
+    OTHER_SCOPE = re.compile(r"(?i)\b(reports?|dashboards?(?!['’]s)|totals?|tiles?|charts?|matri(x|ces)|figures?|headlines?)\b|"
+                             r"\b(other|every|any|each)\s+lists?\b|\ball\s+(the\s+)?lists\b|\bother\s+\w+\s+lists?\b")
+    API_NAME = re.compile(r"\b[A-Z]\w*_\w+")
+    NOT_A_CLUB = re.compile(r"(?i)\b(contacts?|girls?|participants?|partners?|households?|staff|mentors?|coordinators?)\b")
+    EXCEPTION_DAY = "2026-11-18"
+    EXCEPTION_DEPLOYS = ("0AfRP000002kRqT0AU", "0AfRP000002kSo90AE")
+    STILL_COUNTS = (r"(?i)\bstill counts?\b|\bstill (be |being )?counted\b|\bkeeps? counting\b|\bcounts? (still|as before|"
+                    r"everywhere)\b")
     # the one merge a clause may name: one girl's duplicate contacts (tools/sf_dupes.py), in a clause that also
     # says flagged records are not merged by it
     GIRL_WORDS = re.compile(r"(?i)\b(contacts?|girls?)\b")
@@ -428,33 +474,71 @@ class DuplicateRuleDocs(unittest.TestCase):
             break
         return out
 
+    def obsolete_lists_exception(self, s, word):
+        """Whether the hiding word `word` of clause `s` is the one documented exception (DECISIONS 2026-11-18): the
+        four not-submitted lists leave out the Club accounts flagged `Obsolete_Record__c`. The clause names those
+        lists and the obsolete flag; the word leaves out, never deletes or merges; the clause names no duplicate, no
+        bare "flagged" (either flag), no other report, dashboard, total or list (a report's API name included; a
+        deploy's bookkeeping in brackets aside) and no Contact, girl or partner. The section's own title in quotes
+        names neither flag."""
+        if self.DESTRUCTIVE.match(word):
+            return False
+        s = re.sub(self.Q + re.escape(self.SECTION[3:]) + self.QE, " ", s)
+        if not (self.NOT_SUBMITTED.search(s) and self.OBSOLETE.search(s)):
+            return False
+        if self.DUPLICATE.search(s) or self.BARE_FLAGGED.search(s) or self.NOT_A_CLUB.search(s):
+            return False
+        scope = self.DEPLOY_PAREN.sub(" ", s)
+        if self.OTHER_SCOPE.search(scope):
+            return False
+        return all(n in self.LIST_API or n.endswith("__c") for n in self.API_NAME.findall(scope))
+
     def removes_flagged(self, s):
         """A flagged, duplicate or obsolete record deleted, merged, hidden or excluded in clause `s`, not denied
-        where it is said. A field or the flag itself may be removed. The one merge a clause may name is one
-        girl's duplicate contacts (`tools/sf_dupes.py`), in a clause that also says flagged records are not
-        merged by it. The hiding phrases (HIDDEN) count even after a negation, but for "filtered out" and
-        "= false"."""
+        where it is said (the not-submitted lists' names and "no attendance" are no denial). A field or the flag
+        itself may be removed. The one merge a clause may name is one girl's duplicate contacts (`tools/sf_dupes.py`),
+        in a clause that also says flagged records are not merged by it. The hiding phrases (HIDDEN) count even
+        after a negation, but for "filtered out" and "= false" / "equals false". The one exception: the four
+        not-submitted lists leaving out obsolete Club accounts, said with its scope (obsolete_lists_exception)."""
         if not self.FLAGGED.search(s):
             return []
-        for m in self.HIDDEN.finditer(s):
-            if self.HIDDEN_DENIABLE.fullmatch(m.group(0)) and self.locally_denied(s, m):
+        plain = self.LIST_WORDS.sub(" lists ", s)
+        for m in self.HIDDEN.finditer(plain):
+            if self.HIDDEN_DENIABLE.fullmatch(m.group(0)) and self.locally_denied(plain, m):
+                continue
+            if self.obsolete_lists_exception(s, m.group(0)):
                 continue
             return [f"keeps flagged records out of the reports ({m.group(0)!r}): {s[:160]!r}"]
-        scrubbed = self.FIELD_OR_FLAG.sub(" ", s)
+        scrubbed = self.FIELD_OR_FLAG.sub(" ", plain)
         for m in self.REMOVAL.finditer(scrubbed):
             if self.locally_denied(scrubbed, m):
                 continue
             if m.group(0).lower().startswith("merg") and self.GIRL_WORDS.search(scrubbed) \
                     and self.NOT_FOR_FLAG.search(scrubbed):
                 continue
+            if self.obsolete_lists_exception(s, m.group(0)):
+                continue
             return [f"removes, merges or hides flagged records ({m.group(0)!r}): {s[:160]!r}"]
+        return []
+
+    def uncounts_flagged(self, s):
+        """A flagged, duplicate or obsolete record's attendance said to stop counting in clause `s`, not denied where
+        it is said ("never stops counting")."""
+        if not (self.FLAGGED.search(s) and self.COUNTED.search(s)):
+            return []
+        plain = self.LIST_WORDS.sub(" lists ", s)
+        for m in self.UNCOUNTED.finditer(plain):
+            if not self.locally_denied(plain, m):
+                return [f"stops counting a flagged record's attendance ({m.group(0)!r}): {s[:160]!r}"]
         return []
 
     def contradictions(self, text, rollback=False):
         """The clauses of `text` that contradict the rules: the rule's action is Alert or Block (not denied
         where it is said, or denied with a time limit), or it stops a save said in other words; a flagged,
-        duplicate or obsolete record deleted, merged, hidden or kept out of the reports (removes_flagged); a
-        softener not itself denied. With `rollback`, "no rollback" is one."""
+        duplicate or obsolete record deleted, merged, hidden or kept out of the reports (removes_flagged) but for
+        the four not-submitted lists leaving out obsolete Club accounts, said with that scope; a flagged record's
+        attendance no longer counting (uncounts_flagged); a softener not itself denied. With `rollback`, "no
+        rollback" is one."""
         out = []
         girls = re.compile(self.Q + re.escape(self.GIRLS) + self.QE)
         for s in self.clauses(text, ".;:?!"):
@@ -462,6 +546,7 @@ class DuplicateRuleDocs(unittest.TestCase):
             out += self.alert_or_block(kept)
             out += self.stops_a_save(kept)
             out += self.removes_flagged(kept)
+            out += self.uncounts_flagged(kept)
             for m in self.SOFTENER.finditer(s):
                 if not self.locally_denied(s, m):
                     out.append(f"softens a rule ({m.group(0)!r}): {s[:160]!r}")
@@ -476,7 +561,12 @@ class DuplicateRuleDocs(unittest.TestCase):
                                     "Block and never stops, halts, refuses or prompts on a save - name Alert or Block "
                                     "only to deny them or as the cost, `an alert refuses a record created by code`; a "
                                     "flagged record is never deleted, merged, hidden, filtered out or kept out of the "
-                                    "reports; the proof, the check-only, the go and the read-back are never optional): "
+                                    "reports and its attendance always counts, with one exception (DECISIONS "
+                                    "2026-11-18): the four not-submitted lists leave out Club accounts flagged "
+                                    "`Obsolete_Record__c`, said in a clause that itself names the not-submitted lists "
+                                    "(or their API names) and the obsolete flag and nothing else - no duplicate, no bare "
+                                    "\"flagged\", no other report, dashboard or list, no Contact; the proof, the "
+                                    "check-only, the go and the read-back are never optional): "
                                     + "; ".join(found))
 
     # --- reading the docs ---------------------------------------------------------------------------------
@@ -714,6 +804,138 @@ class DuplicateRuleDocs(unittest.TestCase):
                         f"{where}: say `tools/sf_dupes.py` still merges one girl's duplicate contacts by its own key and "
                         "never merges a record for being flagged, in one sentence")
         self.assertNoContradiction(part, where)
+
+    # --- the one exception: the not-submitted lists leave out obsolete clubs (#216, Ryan, 2026-11-18) ------------
+
+    def left_out_paragraph(self):
+        """The RUNBOOK's `**Who is left out**` paragraph: what the not-submitted lists leave out, and how."""
+        m = re.search(r"(?ms)^\*\*Who is left out\*\*.*?(?=\n[ \t]*\n|\Z)", read(self.RUNBOOK))
+        self.assertTrue(m, "docs/RUNBOOK.md: no `**Who is left out**` paragraph (what the not-submitted lists leave out)")
+        return m.group(0)
+
+    def test_the_sweep_allows_only_the_obsolete_exception_on_the_not_submitted_lists(self):
+        """DECISIONS 2026-11-18 amends 2026-10-21 for four lists only: flagged records stay in every report and
+        dashboard and their attendance keeps counting, but the four not-submitted lists may leave out the Club
+        accounts flagged `Obsolete_Record__c`. The sweep reads the exception only in a clause that names those lists
+        and the obsolete flag; anything wider - no list named, another report, the duplicate flag, a bare "flagged",
+        a Contact or partner, a deletion or a merge, attendance that stops counting - stays a contradiction, and the
+        lists' own names ("not-submitted", "Clubs Not Submitting") or "no batch" are no denial. Fictional sentences,
+        one dimension varied at a time."""
+        allowed = (
+            "The four not-submitted lists leave out every Club account flagged obsolete.",
+            "`Clubs_Not_Submitting_Last_Week` filters `Account.Obsolete_Record__c` equals false.",
+            "`Jotform_Clubs_No_Attendance_Last_Month` excludes the Club accounts flagged obsolete.",
+            "An obsolete club does not appear on the not-submitted lists.",
+            "The not-submitted lists (\"Clubs Not Submitting - Last 14 Days\", \"Clubs With No Attendance Last Month\") "
+            "hide obsolete clubs (deploy `0AfRP000002kRqT0AU`, three reports).",
+            "Flagged records are shown in every report and dashboard, with the flags as a filter.",
+            "No flagged record is excluded by default.",
+            "No report filters `Duplicate_Record__c` equals false.",
+            "An obsolete club's past attendance still counts in every total.",
+        )
+        forbidden = (
+            "Every report leaves out the Club accounts flagged obsolete.",                   # no list named
+            "That leaves out every Club account flagged obsolete.",                          # a back-reference only
+            "The four lists leave out every Club account flagged obsolete.",                 # which lists?
+            "The Club Attendance report filters `Obsolete_Record__c` equals false.",         # another report
+            "The not-submitted lists and every other report leave out obsolete clubs.",      # a wider scope
+            "The not-submitted lists and the dashboard's charts hide obsolete clubs.",
+            "The not-submitted lists and `Submissions_by_Club_and_Week` leave out obsolete clubs.",
+            "The not-submitted lists leave out every Club account flagged duplicate.",       # the other flag
+            "The not-submitted lists filter `Duplicate_Record__c` equals false.",
+            "The not-submitted lists leave out every flagged club.",                         # either flag
+            "The not-submitted lists leave out every flagged club and every obsolete one.",
+            "The not-submitted lists leave out the Contacts flagged obsolete.",              # not a club
+            "Obsolete partners are left out of the not-submitted lists.",
+            "The not-submitted lists delete obsolete clubs.",                                # a deletion
+            "Obsolete clubs on the not-submitted lists are merged.",                         # a merge
+            "Obsolete clubs are kept out of the reports.",                                   # said in other words
+            "Clubs with no batch are hidden once flagged obsolete.",                         # "no batch" is no denial
+            "An obsolete club's attendance no longer counts.",                               # attendance
+            "Flagged clubs' batches are not counted in the totals.",
+        )
+        for s in allowed:
+            self.assertEqual(self.contradictions(s), [], f"the sweep reads {s!r} as a contradiction: it is the rule, or "
+                                                         "its one exception said with its scope")
+        for s in forbidden:
+            self.assertNotEqual(self.contradictions(s), [], f"the sweep lets {s!r} through: only the four not-submitted "
+                                                            "lists may leave out Club accounts flagged obsolete, said in "
+                                                            "the clause that names them")
+
+    def test_the_runbook_states_the_obsolete_exception_and_its_scope(self):
+        """The RUNBOOK section names the exception where it says what the kept reports show: the four not-submitted
+        lists, each named, with the obsolete flag in one clause; that is the exception (the only one) to "nothing is
+        excluded by default"; the club's past attendance still counts. No clause of the section, nor of the "Who is
+        left out" paragraph on those lists, leaves flagged records out beyond that."""
+        where = f"RUNBOOK section {self.SECTION[3:]!r}"
+        part = self.section()
+        self.assertTrue(self.said(part, *self.FOUR_LISTS, self.OBSOLETE.pattern, negated=True),
+                        f"{where}: name the four not-submitted lists (Last 14 Days, Since 1 Sept, Last Week, No Attendance "
+                        "Last Month; by label or API name) and `Obsolete_Record__c` in one clause: the lists that leave out "
+                        "the Club accounts flagged obsolete")
+        self.assertTrue(self.said(part, r"(?i)\bexceptions?\b|\bonly\b", self.NOT_SUBMITTED.pattern, ends=".", negated=True),
+                        f"{where}: say in one sentence that the not-submitted lists are the exception (the only one) to "
+                        "flagged records being shown with nothing excluded by default")
+        self.assertTrue(self.said(part, r"(?i)\battendance\b", self.STILL_COUNTS),
+                        f"{where}: say a club flagged obsolete keeps its past attendance counted (\"its past attendance "
+                        "still counts\"), in one sentence")
+        self.assertNoContradiction(part, where)
+        self.assertNoContradiction(self.left_out_paragraph(), "docs/RUNBOOK.md, the `**Who is left out**` paragraph")
+
+    def test_a_decision_records_the_obsolete_exception_and_amends_2026_10_21(self):
+        """Ryan's decision of 2026-11-18 is a dated section at the end of DECISIONS: the four not-submitted lists, each
+        named, leave out the Club accounts flagged `Obsolete_Record__c` (the two deploys); it amends 2026-10-21 for
+        those lists only - every other report and dashboard still shows flagged records, and their attendance still
+        counts - and the 2026-10-21 entry gets a dated bullet pointing at it (the file's header) that names the lists
+        and the obsolete flag. Nothing in the entry leaves flagged records out beyond that."""
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+
+        def day(entry):
+            m = re.match(r"### (\d{4}-\d\d-\d\d) ", entry)
+            return m.group(1) if m else ""
+
+        old = [x for x in entries if day(x) == "2026-10-21" and self.TICKET.search(x) and re.search(r"(?i)\bobsolete\b", x)]
+        self.assertTrue(old, "docs/DECISIONS.md: the 2026-10-21 entry on ticket #84 (the definitions) is missing")
+        new = [x for x in entries if day(x) >= self.EXCEPTION_DAY and "Obsolete_Record__c" in x
+               and self.NOT_SUBMITTED.search(self.norm(x))]
+        self.assertTrue(new, f"docs/DECISIONS.md: no dated entry `### {self.EXCEPTION_DAY} — …` (or later) naming "
+                             "`Obsolete_Record__c` and the not-submitted lists (Ryan's exception of 2026-11-18)")
+        e = new[0]
+        where = f"docs/DECISIONS.md {day(e)}"
+        self.assertGreater(entries.index(e), entries.index(old[0]),
+                           f"{where}: the entry comes after the 2026-10-21 one (the file is in date order)")
+        self.assertTrue(self.said(e, *self.FOUR_LISTS, self.OBSOLETE.pattern, negated=True),
+                        f"{where}: name the four not-submitted lists (`Clubs_Not_Submitting_Last_14_Days`, `_Since_1_Sept`, "
+                        "`_Last_Week`, `Jotform_Clubs_No_Attendance_Last_Month`) and `Obsolete_Record__c` in one clause")
+        for deploy in self.EXCEPTION_DEPLOYS:
+            self.assertIn(deploy, e, f"{where}: record the deploy `{deploy}` (the lists' filter is live)")
+        self.assertTrue(self.said(e, r"\bRyan\b", self.EXCEPTION_DAY, negated=True),
+                        f"{where}: attribute the decision to Ryan, {self.EXCEPTION_DAY}, in one sentence")
+        self.assertTrue(self.said(e, r"2026-10-21", r"(?i)\bamend\w*|\bnarrow\w*|\bexceptions?\b", negated=True),
+                        f"{where}: say the entry amends the 2026-10-21 decision (flagged records shown, nothing excluded), "
+                        "in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\b(every|all|any|each|no)\s+other\b", r"(?i)\breports?\b", r"(?i)\bdashboards?\b",
+                                  r"(?i)\bflag\w*|\bobsolete\b", negated=True),
+                        f"{where}: say the exception is those lists only: every other report and dashboard still shows "
+                        "flagged records, in one sentence")
+        self.assertTrue(self.said(e, r"(?i)\battendance\b", self.STILL_COUNTS),
+                        f"{where}: say a club flagged obsolete keeps its past attendance counted, in one sentence")
+        rest = re.sub(r"(?ms)^- \*\*Rejected.*?(?=^- \*\*|\Z)", "", e)
+        self.assertNoContradiction(rest, where)
+        # the 2026-10-21 entry: a dated bullet pointing at the new entry, naming the lists and the obsolete flag, so its
+        # "nothing is excluded by default" reads with the exception (its sweep: test_a_decision_records_glows_definitions)
+        pointer_rx = r"(?m)^\s*- " + re.escape(day(e)) + r"[:,].*(?:\n(?!\s*- |\n|#).*)*"
+        pointers = re.findall(pointer_rx, old[0])
+        self.assertTrue(pointers, f"docs/DECISIONS.md 2026-10-21: the entry gets a dated bullet `- {day(e)}: …` pointing at "
+                                  f"the {day(e)} entry (the file's header: the earlier decision gets a dated bullet "
+                                  "pointing at the one that amends it)")
+        joined = " ".join(flat(b) for b in pointers)
+        self.assertRegex(joined, r"(?i)\bsee\b|\bentry\b|\bamend\w*|\bbelow\b",
+                         f"docs/DECISIONS.md 2026-10-21: the `- {day(e)}:` bullet points at the new entry (\"see the {day(e)} "
+                         "entry\", \"amended\")")
+        self.assertTrue(self.said(joined, self.NOT_SUBMITTED.pattern, self.OBSOLETE.pattern, negated=True),
+                        f"docs/DECISIONS.md 2026-10-21: the `- {day(e)}:` bullet names the not-submitted lists and the "
+                        "obsolete flag in one clause")
 
     # --- the proof and the cross-type pairs: the docs as deployed (Ryan, 2026-10-22) ------------------------
 

@@ -14,15 +14,21 @@ intent: <Ryan's ask in his words, with its date> | docs/intent/YYYY-MM-DD-<slug>
      is a ticket. When it is done: a Result (what ran, with Ryan's go, and how it was verified), the
      status and `done:`, then `make docs-index`. -->
 
-## Rollout (live; each step on Ryan's go)
+## Rollout (live)
 <!-- The merge is the rollout for a form change the sync generates: once it lands, the runner
      applies it to every enabled regional form on its next run (DECISIONS 2026-10-14). List the
      hand steps only: the template, from the ticket branch before the land, when the change needs
      browser checks (the runner never syncs it); a disabled form (`--disabled-ok`); writers other
      than the sync (translations, builder edits); and the read-back after the runner's run (each
      region's SyncLog row `applied`, `form_status.py` CLEAN per form). No step sets
-     `AUTO_SYNC_APPLY`. -->
-1. <live step: the backup first, the command, and the read-back that proves it>
+     `AUTO_SYNC_APPLY`.
+     A step whose backup from today is on record runs automatically through the live gate, logged
+     and notified (RUNBOOK "Live gate (Claude Code)", DECISIONS 2026-10-26). A step that deletes,
+     and `--prune`, still asks Ryan in the session; so does a step whose backup is missing, or
+     whose tool the gate does not list: mark those steps "on Ryan's go". -->
+1. <live step: the backup first (`backup_forms.py --form <id>`, `sheets_client.py export`, a
+   committed `appsscript/`, the plan's `before/` retrieve), the command, and the read-back that
+   proves it>
 2. …
 
 ## Rollback
