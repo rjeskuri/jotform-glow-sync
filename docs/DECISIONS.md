@@ -961,3 +961,14 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The filter leaves out of the four not-submitted lists every obsolete club, the flagging batch's six-months-without-a-batch clubs included; those are clubs not submitting by definition, so they leave the lists once the batch flags them.
   - `flag` mode never clears a flag: a club brought back stays off the lists until its flag is cleared by hand (RUNBOOK "Deactivating a club", The way back).
   - A club retired from the Roster is flagged by hand at retirement (one record, Ryan's go), not left to the batch.
+
+### 2026-11-19 — The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger (#228)
+
+- `installTriggers` also installs a time-driven trigger for `syncFormChoicesHourly`, every hour. It runs `syncFormChoices` under the document lock, as the menu item does, skips quietly when the lock is busy, and writes an Audit row only when a dropdown changed. The menu item stays, for at once.
+- **Why:** a club renamed, deactivated or moved by a tool changes the Roster only; the Club Roster Form kept offering the old list until someone ran the menu item in the sheet, and a change sent for a retired club runs against the inactive rows. The refresh needs no person and stays inside the script, where the form's code already lives.
+- **Plan:** `docs/plans/2026-11-19-hourly-club-roster-refresh.md` (Rollout, Rollback, Result).
+- **Rejected:** calling the Apps Script API (`scripts.run`) from the Mac after a tool's apply (it needs an API-executable deployment, a standard GCP project and Ryan's user OAuth token on the Mac, and lets a session run any script function); editing the Google Form from Python (it duplicates `syncFormChoices` in a second language, the parity risk of CLAUDE.md rule 7).
+- **Consequences:**
+  - Until Ryan pushes the script and runs `installTriggers` once, the menu is still the only way. After that the window is up to an hour, during which the Club Roster Form can still offer a retired club; the menu closes it at once.
+  - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
+  - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".

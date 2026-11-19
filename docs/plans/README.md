@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-19 | The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger | accepted |  | [2026-11-19-hourly-club-roster-refresh.md](2026-11-19-hourly-club-roster-refresh.md) |
 | 2026-11-18 | A Region filter on the Jotform Attendance dashboard, through Account.Partner_Region__c | done 2026-11-18 | 59 | [2026-11-18-sf-region-filter.md](2026-11-18-sf-region-filter.md) |
 | 2026-11-18 | Jotform Attendance dashboard - girls present by club and date replaces the blank-submissions tile | done 2026-11-18 |  | [2026-11-18-sf-dash-club-date-table.md](2026-11-18-sf-dash-club-date-table.md) |
 | 2026-11-18 | Otra Cosa's and CCCYD's club renames, Otra Cosa's three combined lists retired, obsolete clubs off the club lists | done 2026-11-18 | 60, 77 | [2026-11-18-ocn-cccyd-renames.md](2026-11-18-ocn-cccyd-renames.md) |

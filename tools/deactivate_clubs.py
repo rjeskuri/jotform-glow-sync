@@ -59,9 +59,9 @@ go back, it leaves written.json - its rows and its line under "clubs" - and
 the undo runs again; its own rows are put back by hand from Roster.csv or
 through the Club Roster Form.
 
-Afterwards (docs/RUNBOOK.md, "Deactivating a club"): in the sheet, GLOW ->
-Google Forms -> Update form dropdowns from the Roster, so the Club Roster
-Form stops offering the clubs; export the Roster; the template's sync dry run
+Afterwards (docs/RUNBOOK.md, "Deactivating a club"): the hourly refresh stops
+the Club Roster Form offering the clubs (in the sheet, GLOW -> Google Forms ->
+Update form dropdowns from the Roster, for at once); export the Roster; the template's sync dry run
 plans the retirements.
 """
 import argparse
@@ -378,7 +378,8 @@ def write_cells(svc, before, cols, changes, pairs, label, gained="came in for th
 
 def next_steps(regions, undo_dir=None):
     print("\nNext (docs/RUNBOOK.md, \"Deactivating a club\"):")
-    print("  In the sheet, now: GLOW -> Google Forms -> Update form dropdowns from the Roster")
+    print("  The Club Roster Form stops offering the clubs with the hourly refresh; for at once, in the")
+    print("    sheet: GLOW -> Google Forms -> Update form dropdowns from the Roster")
     print("    (until then the Club Roster Form still offers the clubs, and a change sent for one "
           "runs against the inactive rows)")
     print("  python3 tools/sheets_client.py export Roster data/roster_<date>.csv")
