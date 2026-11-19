@@ -125,8 +125,10 @@ And put the problem-report and Club Roster Form links on the attendance forms
 
 Things to know:
 
-- The form dropdowns are refreshed from the Roster after every submission
-  and by **Update form dropdowns from the Roster**. A brand-new partner
+- The form dropdowns are refreshed from the Roster after every submission,
+  every hour (`syncFormChoicesHourly`, installed by `installTriggers`; it skips
+  quietly when the lock is busy and writes an Audit row only when a dropdown
+  changed) and, for at once, by **Update form dropdowns from the Roster**. A brand-new partner
   (enrolled via "not in this list") gets its own club section automatically.
   Once the 2026-10-09 code is pushed, the menu item takes the document lock
   as the handlers do (busy: a "try again" message), and **Create the Google

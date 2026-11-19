@@ -28,7 +28,7 @@ const everything = loadGs(null, ALL, { strict: true });
 const allNames = loadGs.declarations(ALL.map(read).join('\n'));
 check('all ' + ALL.length + ' .gs files load together, strict, and export every top-level name (' + allNames.length + ')',
       Object.keys(everything).length === allNames.length &&
-      ['onAnyFormSubmit', 'sendSfPendingDigest', 'onOpen', 'syncFormChoicesFromMenu'].every(n => typeof everything[n] === 'function'));
+      ['onAnyFormSubmit', 'sendSfPendingDigest', 'onOpen', 'syncFormChoicesFromMenu', 'syncFormChoicesHourly'].every(n => typeof everything[n] === 'function'));
 const owner = {}, twice = [];
 for (const f of ALL) {
   for (const n of loadGs.declarations(read(f))) {
