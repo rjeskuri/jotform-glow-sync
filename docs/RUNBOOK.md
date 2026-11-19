@@ -5568,14 +5568,20 @@ Apex method, its signature and what it reads: [plan, Inventory](plans/2026-10-21
 `tools/backfill_resolve.py` (GET only) writes one row per (submission, ticked
 roster) of the four regional forms to `data/backfill_2026-09/resolved.json`;
 the club is the roster the mentor ticked girls in, never question 5. Its window
-is September's: for another month, edit `SINCE`, `MONTH_START` and
-`DEFAULT_OUT` at its top first. Its files hold girls' names and mentors'
-contact details: they stay under `data/` (owner-only), and only the counts it
-prints go into a plan or a message.
+is September's unless `--since 'YYYY-MM-DD HH:MM:SS'` (the cut-off, US Eastern,
+Jotform's `created_at`) and `--month-start YYYY-MM-DD` (an attendance date
+before it is flagged `date_before_2026_09`, whatever the month) say otherwise;
+another window also needs `--out` in a new folder (it refuses September's
+default file), the folder the loader then takes with `--dir` (#238). Its
+files hold girls' names and mentors' contact details: they stay under `data/`
+(owner-only), and only the counts it prints go into a plan or a message.
 
 ```bash
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv     # a fresh export, every time
 python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET only; a few minutes (Africa)
+python3 tools/backfill_resolve.py --roster data/roster_<date>.csv \
+    --since '2026-11-13 01:00:00' --month-start 2026-11-01 \
+    --out data/backfill_2026-11/resolved.json                           # an incident's window (#238)
 ```
 
 How to read its report, its flags and its refusals: [plan](plans/2026-09-30-backfill-resolver.md#from-the-runbook-moved-2026-10-09).
@@ -5593,9 +5599,10 @@ Never replay a submission as Jotform stored it: question 5 and the name list
 were wrong on part of September, and Salesforce turns whatever it gets into
 accounts, contacts and attendance at once. `tools/backfill_resolve.py` ("September
 back-fill: the resolver") then `tools/sf_backfill.py` stay the procedure for a
-new incident, but both are written for September: set the window first
-(`SINCE`, `MONTH_START`, `DEFAULT_OUT` in `tools/backfill_resolve.py`; a new
-folder for `tools/sf_backfill.py`, `--dir`, whose default is
+new incident, but both default to September: give the window and a new folder
+first (`tools/backfill_resolve.py --since '<created_at, US Eastern>'
+--month-start <yyyy-mm-dd> --out data/backfill_<when>/resolved.json`; the same
+folder to every `tools/sf_backfill.py` command with `--dir`, whose default is
 `data/backfill_2026-09`), then follow the procedure as run:
 [plan](plans/2026-09-30-september-backfill.md#from-the-runbook-moved-2026-10-09).
 
