@@ -1242,6 +1242,16 @@ the region folders themselves ([retention plan](plans/2026-10-30-photo-retention
 is deleted from Drive until the photo mover's retention is live. Jotform keeps its own copy
 (Auto Delete Submissions stays off, BACKLOG 68).
 
+**The date in a folder's name is the session date** (question 17, the date the mentor picks),
+not the upload date (#225, 2026-11-19). **Planned (#225, not live yet):** the subfolder naming
+becomes `{Partner} | {Club Name} | {Date} | {Week}` (e.g. `Sunrise Partners | Sunrise Club |
+10-30-2026 | 4`; `{Week}` is question 100, blank for a special event), and the photo mover files
+such a folder under `<Region>/<Partner>/<YYYY-MM>/` ("Photo mover", below). It waits for question
+331 (Partner) to be filled on the forms with the Club picker (a calculation the sync generates,
+CLAUDE.md rule 3; a follow-up ticket); the order and every step: the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout. Until then step 2's naming
+below stands.
+
 `python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
 Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
@@ -1413,6 +1423,16 @@ owned by Ryan's company account - not the sheet's script, whose scopes must not 
 for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
 Setup, Script Properties and the push: `drive-sync/README.md`.
 
+**Where a subfolder goes** (#225, in the repo since 2026-11-19; live once pasted, [plan](plans/2026-11-19-photo-folders-partner-month.md)):
+a subfolder named `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (the week blank or left out
+for a special event) goes in `<Region>/<Partner>/<YYYY-MM>/`, the month from its session date;
+the mover finds the partner and month folders by name (one in the trash does not count) and
+makes them when missing. Any other name (`<Club> <MM-DD-YYYY>`, the club alone, a blank partner,
+a date that is not a real date) goes directly in the region folder, as before. The subfolder's
+own name never changes, and a same-name folder counts only at its own path (a merge, a
+`REFUSED`). The folders already on the Shared Drive stay where they are (their re-filing is a
+separate follow-up: their names carry no partner).
+
 The order, each live step on Ryan's go (Ryan, 2026-10-22):
 
 1. PR #91 lands: code only, nothing live.
@@ -1481,8 +1501,18 @@ no new scope, no new service):
    the plan's Result. From then on the mover removes the emptied subfolders (step 6 of the
    paste above).
 
+**Updating the live project (#225)** (Ryan, on his go; the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout): `removeTrigger`, the same
+paste of `Plan.gs` and `Mover.gs` (the manifest unchanged: no new scope, no new service),
+`previewMoves` (the existing subfolders log as before, without a target path; nothing changes),
+then `installTrigger`. The new code files only the new naming under partner and month, so it
+can go live before any form's naming changes.
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
+A subfolder filed under a partner and month has its target after its name: `would move "<name>"
+to <Region>/<Partner>/<YYYY-MM>` (the dry run), `move "<name>" to …` (the real run); one filed
+directly in the region folder has none.
 
 - **move**: a folder of that name was made in the region's folder and the subfolder's files
   moved into it (Drive cannot move the folder itself, #132); the emptied subfolder stays in My
@@ -1512,8 +1542,11 @@ remove N, rescue N`, then the folders by name (club and date; never a file's nam
 - **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
   moving at 4.5; what it did not read is not touched, and the next run carries on (a move cut
   short, its folder made and some files moved, is finished by the next run as a merge).
-- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
-  hand (pick the right folder), or rename one of the two there.
+- **REFUSED**: two or more folders of that name on the Shared Drive already (at its path). Move
+  or merge it by hand (pick the right folder), or rename one of the two there. `REFUSED "<name>"
+  to <Region>/<Partner>/<YYYY-MM>: 2 folders named "<Partner>" in the region folder` (or `named
+  "<YYYY-MM>" in "<Partner>"`, #225): two partner (or month) folders of one name; nothing of that
+  subfolder moves until the two are merged by hand into one.
 - **UNKNOWN**: a folder that is no region's; left alone.
 - **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
   source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly

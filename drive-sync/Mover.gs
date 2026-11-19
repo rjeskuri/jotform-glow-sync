@@ -42,6 +42,14 @@
  * supportsAllDrives); a merge moves them the same way into the folder already there. A move cut
  * short by a failure or the time budget is finished by a later run as a merge.
  *
+ * Where (#225, docs/plans/2026-11-19-photo-folders-partner-month.md): a subfolder named
+ * `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` goes in `<Partner>/<YYYY-MM>` under the region
+ * folder (Plan.gs photoPath_), any other name directly in the region folder as before. The partner
+ * and month folders are found by name (one in Drive's trash does not count) and reused, or made
+ * by Drive.Files.create (supportsAllDrives) by the real run when missing, once per run; two of one
+ * name at a level: that subfolder is REFUSED, logged with the reason, and nothing of it moves.
+ * The dry run makes nothing and logs each subfolder's target path. Nothing is ever renamed.
+ *
  * What it trashes in My Drive (#144), and only on the real run: an emptied source subfolder, once
  * it holds no file and no subfolder and has not changed for SETTLE_MINUTES (Plan.gs `remove`),
  * re-read and re-listed just before, to Drive's trash (restorable for 30 days), through
@@ -55,8 +63,9 @@
  * it (RESCUE_FAILED when it is still in the trash or not where it was sent). A file a person
  * trashed is left alone.
  *
- * The log holds counts and folder names (`<Club Name> <Attendance Date>`; for retention only the
- * region folders' direct subfolders), never a file's name or contents. Nothing here shares,
+ * The log holds counts and folder names (the submission subfolders', their partner and month
+ * folders'; for retention only the region folders' direct subfolders), never a file's name or
+ * contents. Nothing here shares,
  * links, copies or e-mails anything: a file only ever moves (its parent changes, and out of the
  * trash when the rescue finds it there) or, on the Shared Drive once due, goes to its trash; a
  * move never replaces a file.
@@ -168,7 +177,7 @@ function runMover_(apply) {
     const driveId = days === null ? null : sharedDriveOf_(config);
     const protect = apply ? protectedIds_(config) : null;
     const read = readDrives_(opened, started + RUN_BUDGET_MS / 2);
-    const plan = planMoves_(read.sources, read.targets, new Date(), SETTLE_MINUTES);
+    const plan = holdRefusedPaths_(planMoves_(read.sources, read.targets, new Date(), SETTLE_MINUTES), read.levels);
     logPlan_(plan, config, apply, read.inTrash);
     if (days === null) console.log('retention off (RETENTION_DAYS not set)');
     let moveError = null;
@@ -249,17 +258,21 @@ function openRegionFolders_(config) {
 
 /**
  * The planner's inputs: per region the source subfolders, live and in the trash, with their
- * files, and beside each one with files the target's subfolders of the same name (all the planner
- * compares with), so a subfolder read always has its target side read too. A live subfolder is
+ * files, and beside each one with files the target's subfolders of the same name at its path
+ * (Plan.gs photoPath_: directly in the region folder, or in its <Partner>/<YYYY-MM> folders, #225;
+ * all the planner compares with), so a subfolder read always has its target side read too. The
+ * partner and month folders are read by name once per run each, those in the trash left out, into
+ * `levels` (readPath_); below a missing one nothing is read, below two of one name nothing either
+ * (refused). A live subfolder is
  * read through DriveApp (its files, its own subfolders, when it last changed); the subfolders in
  * the trash and their files through the advanced Drive service, `trashed = true` stated (#144,
  * the rescue). An emptied subfolder (no files: what a move left behind) costs its one listing and
  * nothing more. Past `readBy` no further subfolder is read (TIME_BUDGET): what was not read is not
- * in the plan, and waits for the next run. Also returned: inTrash {subfolder id: true} and
- * sourceIds {region: source folder id}.
+ * in the plan, and waits for the next run. Also returned: inTrash {subfolder id: true},
+ * sourceIds {region: source folder id} and levels {region: readPath_'s levels}.
  */
 function readDrives_(opened, readBy) {
-  const sources = [], targets = {}, inTrash = {}, sourceIds = {};
+  const sources = [], targets = {}, inTrash = {}, sourceIds = {}, levels = {};
   let stopped = false, count = 0;
   const outOfTime = () => {
     if (Date.now() > readBy) stopped = true;
@@ -271,6 +284,7 @@ function readDrives_(opened, readBy) {
     sources.push(source);
     targets[o.region] = target;
     sourceIds[o.region] = source.id;
+    levels[o.region] = {};
     if (stopped) continue;
     const looked = {}, seen = {};
     const add = sub => {
@@ -279,11 +293,11 @@ function readDrives_(opened, readBy) {
       count++;
       if (!sub.files.length || Object.prototype.hasOwnProperty.call(looked, sub.name)) return;
       looked[sub.name] = true;
-      const same = o.target.getFoldersByName(sub.name);
-      while (same.hasNext()) {
-        const t = same.next();
-        if (t.isTrashed()) continue;
-        target.subfolders.push({ id: t.getId(), name: t.getName(), files: describeFiles_(t) });
+      const path = photoPath_(sub.name);
+      const at = readPath_(o.target, path, levels[o.region]);
+      if (!at.folder) return;
+      for (const t of liveFoldersNamed_(at.folder, sub.name)) {
+        target.subfolders.push({ id: t.getId(), name: t.getName(), path: path, files: describeFiles_(t) });
       }
     };
     const it = o.source.getFolders();
@@ -304,7 +318,94 @@ function readDrives_(opened, readBy) {
     }
   }
   if (stopped) console.log('TIME_BUDGET: reading stopped after ' + count + ' subfolder(s); the rest waits for the next run');
-  return { sources: sources, targets: targets, inTrash: inTrash, sourceIds: sourceIds };
+  return { sources: sources, targets: targets, inTrash: inTrash, sourceIds: sourceIds, levels: levels };
+}
+
+/** The folders named `name` directly in `folder`, those in Drive's trash left out (DriveApp lists them too). */
+function liveFoldersNamed_(folder, name) {
+  const live = [];
+  const it = folder.getFoldersByName(name);
+  while (it.hasNext()) {
+    const d = it.next();
+    if (!d.isTrashed()) live.push(d);
+  }
+  return live;
+}
+
+/**
+ * The folder at `path` ([] or [<Partner>, <YYYY-MM>]) below the region folder `target` (#225),
+ * read one level at a time; each level read once per run into `levels` {JSON of the path down to
+ * it: {id, folder, refused}}, which the real run then fills in as it makes the missing ones
+ * (pathFolderId_). A level of no live folder of that name: id and folder null, and every level
+ * below it too, unread; two or more: `refused` says so and nothing below it is read. Returns the
+ * last level reached: {folder: null} when missing or refused.
+ */
+function readPath_(target, path, levels) {
+  let at = { id: target.getId(), folder: target, refused: '' };
+  for (let k = 0; k < path.length; k++) {
+    const key = JSON.stringify(path.slice(0, k + 1));
+    if (!Object.prototype.hasOwnProperty.call(levels, key)) {
+      const live = at.folder ? liveFoldersNamed_(at.folder, path[k]) : [];
+      levels[key] = live.length > 1 ?
+        { id: null, folder: null, refused: live.length + ' folders named "' + path[k] + '" in ' +
+                                            (k ? '"' + path.slice(0, k).join('/') + '"' : 'the region folder') } :
+        { id: live.length ? live[0].getId() : null, folder: live.length ? live[0] : null, refused: '' };
+    }
+    at = levels[key];
+    if (at.refused) return at;
+  }
+  return at;
+}
+
+/** Why the folders of `path` refuse it (two of one name at a level, as read), '' when they do not. */
+function pathRefusal_(path, levels) {
+  for (let k = 1; k <= path.length; k++) {
+    const at = levels[JSON.stringify(path.slice(0, k))];
+    if (at && at.refused) return at.refused;
+  }
+  return '';
+}
+
+/**
+ * The plan with each move and merge whose path the read refused (pathRefusal_) taken out and put
+ * among the refused, with its reason `why`: nothing of that subfolder moves this run (#225).
+ */
+function holdRefusedPaths_(plan, levels) {
+  const why = e => (e.path && e.path.length && levels[e.region] ? pathRefusal_(e.path, levels[e.region]) : '');
+  const held = plan.moves.concat(plan.merges).filter(e => why(e))
+    .map(e => ({ region: e.region, id: e.id, name: e.name, path: e.path, why: why(e) }));
+  if (!held.length) return plan;
+  const ids = new Set(held.map(e => e.id));
+  return Object.assign({}, plan, { moves: plan.moves.filter(e => !ids.has(e.id)), merges: plan.merges.filter(e => !ids.has(e.id)),
+                                   refused: plan.refused.concat(held) });
+}
+
+/**
+ * The id of the folder a move's new folder goes in: the region folder `to` for path [], else the
+ * last of its <Partner>/<YYYY-MM> folders, each one the read found reused, each one missing made
+ * (Drive.Files.create, supportsAllDrives) and kept in `levels` for the moves after it, and pushed
+ * to `movedInto`. Throws when a level was not read or was refused, or Drive does not confirm one.
+ */
+function pathFolderId_(move, levels, movedInto) {
+  let parent = move.to;
+  const path = move.path || [];
+  for (let k = 0; k < path.length; k++) {
+    const at = levels ? levels[JSON.stringify(path.slice(0, k + 1))] : null;
+    if (!at || at.refused) throw new Error('the folder "' + path.slice(0, k + 1).join('/') + '" was not read as one folder');
+    if (!at.id) {
+      const made = Drive.Files.create({ name: path[k], mimeType: FOLDER_MIME, parents: [parent] }, null, { supportsAllDrives: true });
+      if (!made || !made.id) throw new Error('Drive did not confirm the folder "' + path.slice(0, k + 1).join('/') + '"');
+      at.id = made.id;
+      movedInto.push(made.id);
+    }
+    parent = at.id;
+  }
+  return parent;
+}
+
+/** ' to <Region>/<Partner>/<YYYY-MM>' for an entry filed below the region folder, '' for one filed in it. */
+function pathText_(e) {
+  return e.path && e.path.length ? ' to ' + e.region + '/' + e.path.join('/') : '';
 }
 
 /**
@@ -404,14 +505,15 @@ function logPlan_(plan, config, apply, inTrash) {
     console.log(c.region + ': ' + verb + 'move ' + moves.length + ', ' + verb + 'merge ' + merges.length +
                 ' (' + filesIn + ' file(s) in, ' + kept + ' kept), waiting ' + waiting.length +
                 ', refused ' + refused.length + ', ' + verb + 'remove ' + remove.length + ', ' + verb + 'rescue ' + rescue);
-    for (const m of moves) console.log('  ' + verb + 'move "' + m.name + '"' + bin(m));
+    for (const m of moves) console.log('  ' + verb + 'move "' + m.name + '"' + pathText_(m) + bin(m));
     for (const m of merges) {
-      console.log('  ' + verb + 'merge "' + m.name + '"' + bin(m) + ': ' + m.files.length + ' file(s) in, ' + m.kept.length +
-                  ' kept in My Drive (same name and size already on the Shared Drive)');
+      console.log('  ' + verb + 'merge "' + m.name + '"' + pathText_(m) + bin(m) + ': ' + m.files.length + ' file(s) in, ' +
+                  m.kept.length + ' kept in My Drive (same name and size already on the Shared Drive)');
     }
-    for (const w of waiting) console.log('  waiting "' + w.name + '"' + bin(w));
+    for (const w of waiting) console.log('  waiting "' + w.name + '"' + pathText_(w) + bin(w));
     for (const r of refused) {
-      console.log('  REFUSED "' + r.name + '"' + bin(r) + ': two or more folders of this name on the Shared Drive; move it by hand');
+      console.log('  REFUSED "' + r.name + '"' + pathText_(r) + bin(r) + ': ' +
+                  (r.why || 'two or more folders of this name') + ' on the Shared Drive; move it by hand');
     }
     for (const e of remove) {
       console.log('  ' + verb + 'remove "' + e.name + '": empty, unchanged for ' + SETTLE_MINUTES + ' min or more; to the trash');
@@ -442,7 +544,8 @@ function carryOut_(plan, deadline, read, protect, movedInto) {
     if (late()) { deferred++; continue; }
     let made;
     try {
-      made = Drive.Files.create({ name: m.name, mimeType: FOLDER_MIME, parents: [m.to] }, null, { supportsAllDrives: true });
+      const parent = pathFolderId_(m, read.levels && read.levels[m.region], movedInto);
+      made = Drive.Files.create({ name: m.name, mimeType: FOLDER_MIME, parents: [parent] }, null, { supportsAllDrives: true });
     } catch (e) {
       failed.push('MOVE_FAILED ' + m.region + ' "' + m.name + '": folder not confirmed, its files stay in My Drive ' +
                   '(the next run merges if it exists): ' + errorText_(e));
