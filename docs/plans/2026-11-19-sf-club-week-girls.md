@@ -17,7 +17,12 @@ Ticket #226. Procedures: RUNBOOK "Attendance dashboard in Salesforce".
   attendance per week.
 - "Submissions by Club and Week" (`00ORP000009kYPk2AM`) counts submissions (batches), not girls.
 - "Attendance By Club By Date" (`00ORP000007uBRN2A2`) lists girls by club and date. Ryan likes it
-  and asked for an easy way to search it (2026-11-18): part 1.
+  and asked for an easy way to search it (2026-11-18): part 1. The ticket asked for a default of
+  the last 8 weeks; the build on Ryan's go uses the last 90 days, the range the dashboard's
+  club-by-date table uses (#231). A long range can pass Lightning's row display limit for a whole
+  region; a viewer narrows it with the Region, Partner and Club filters (a known residual).
+- Region is a filter on both reports, not a shown column (Ryan to accept this reading of the
+  definition of done's "with the partner and region").
 - Part 2, Ryan's choice of 2026-11-19: a new standalone matrix report, girls present per club and
   week, in the Attendance folder, not on the dashboard; "Submissions by Club and Week" is left
   unchanged.
