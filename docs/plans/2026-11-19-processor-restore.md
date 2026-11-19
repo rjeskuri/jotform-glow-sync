@@ -1,8 +1,9 @@
 ---
 title: Restore the attendance processor after another team's release overwrote it on 2026-10-26
 author: Claude (ticket #238, found 2026-11-19 while re-sending #153 group B)
-status: in-progress      # ticket #238; processor restored 2026-11-19 14:39 UTC on Ryan's go; Jotform delivery (B) open
+status: done      # ticket #238; processor restored 2026-11-19 14:39 UTC; Jotform reconnected and back-filled the same day
 created: 2026-11-19
+done: 2026-11-19
 intent: Ryan, 2026-11-19 - "That is Cyntexa. They are handling different work, so let's fix the attendance processor" (option 1, redeploy ours)
 ---
 
@@ -82,5 +83,47 @@ batches the re-send added stay: the RUNBOOK's re-send rollback, by id from
   - In all, 160 rows added and 23 new contacts, in 8 clubs.
   - The morning's copy BATCH-001853, made under their processor (Failed, 0 rows), was deleted on
     Ryan's go and closed `--removed`.
-- `Girls_Present__c`: 557 Success batches to set (8,115 rows), per the plan of 2026-11-19.
-  Outcome below.
+- `Girls_Present__c`: 557 Success batches set and read back (8,115 rows;
+  `data/sf_girls_present/ledger.csv`). `sf_girls_present.py check`: 1,683 Jotform Success
+  batches, differ 0, without a value 0.
+- Duplicate-girls check (`sf_dupes.py check`): 1 group, 1 extra contact in one club, created
+  2026-10-30 (left for the monthly merge).
+
+### B: Jotform delivery, stopped 2026-11-13 06:01 UTC
+
+- Cause: Ryan's user was frozen. LoginHistory shows 'User is Frozen' for the browser until
+  2026-11-15 05:27 UTC and for GLOW Sync until 17:30 UTC that day (16 tries from the runner). It
+  was unfrozen 2026-11-17 05:27 UTC. The freeze revoked every token, Jotform's included.
+- Ryan re-authorised the Jotform connection on 2026-11-19 at about 15:40 UTC (a new Jotform
+  token; `integration_status.py` reads ok for the 4 live forms on connection 10566091). The
+  first live batch came in at 15:49 UTC (BATCH-001875, Success, `Girls_Present__c` 15).
+- Back-fill: `tools/backfill_resolve.py` gained `--since` and `--month-start` (tests first on
+  this branch).
+  - The resolver ran from 2026-11-13 01:00:00 US Eastern into `data/backfill_2026-11/`: 180
+    submissions with girls ticked, balanced.
+  - The plan made 169 club-days. 2 were already in Salesforce and 166 were held, before
+    `decisions.csv`.
+- Rulings on the held sessions (Claude, 2026-11-19, under Ryan's "keep going until all of these
+  issues are fixed"):
+  - `club_has_earlier_contacts` (165) accepted: the live processor matches names against
+    existing contacts on every submission.
+  - `more_new_girls_than_proven` (12, up to 31 new girls) sent with `--max-new 35`:
+    - The 22 was proven before the 2026-10-02 one-insert fix.
+    - Live batches since have run to 35 rows or more.
+    - A batch over a limit saves nothing (`not_saved`, retry).
+  - `similar_names` (3) accepted: the Contact duplicate rule reports and does not block.
+  - Gem Group, dated 2026-08-11, moved to `date 2026-11-08` (the tool's day/month swap).
+  - `same_day_different_module` (5): the later report is used (the mentor's correction).
+  - Skipped as follow-ups:
+    - San Pedro Sacatepequez 2026-10-17 (`module_not_usable`: no module or week, 15 girls).
+    - AusCam Club 3 2026-10-03 (Salesforce has 18 rows, the three reports tick 26). The
+      back-fill never adds to a day Salesforce already has.
+- Sent 2026-11-19: **165 batches, each read back ok** (BATCH-001876, then BATCH-001877 to
+  BATCH-002040). They hold 2,386 attendance rows, with 55 new girls, in 131 clubs. The ledger is
+  `data/backfill_2026-11/ledger.csv`; `created_contacts.csv` lists the 55 new contacts.
+- After: Salesforce holds 166 batches created since the reconnect, all Success (165 back-fill
+  and 1 live).
+  - `sf_girls_present.py check`: 1,849 Jotform Success batches, differ 0, without a value 0.
+  - `sf_dupes.py check`: the same single group as before, so the back-fill made no new duplicate.
+- Rollback of the back-fill: by id from the ledger and `created_contacts.csv`, only with Ryan's
+  go. The BACKLOG 78 warning holds: a back-fill contact may carry live rows.
