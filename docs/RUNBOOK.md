@@ -5689,7 +5689,7 @@ they are (history); a failed batch is never copied twice.
   `salesforce_has_different_count` or skips it `already_in_salesforce`). Never failed as `Duplicate`,
   so `resend` does not see it. On Ryan's word the session goes as one batch, which the processor
   (since 2026-10-24, ticket #108) merges into the day's original batch.
-- **Status:** built 2026-11-20 (ticket #244, [plan](plans/2026-11-20-backfill-two-club-days.md)).
+- **Status:** built 2026-11-20 (ticket #244, [plan](plans/2026-11-20-backfill-two-club-days.md)); run live once, 2026-11-20 (AusCam Club 3, 8 rows; [Result](plans/2026-11-20-backfill-two-club-days.md#result)).
 - **Dry run:** the clause `merge` on the session's line in `decisions.csv`, `plan`, then
   `python3 tools/sf_backfill.py --dir <folder> merge --vpn-off` (it reads Salesforce, so `--vpn-off` too).
 - **Apply:** `merge --apply --vpn-off --only '<key>'` (quoted: a key holds a `|`), Ryan's go.

@@ -1,7 +1,7 @@
 ---
 title: The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event
 author: Claude (ticket #244, on Ryan's go of 2026-11-19)
-status: in-progress      # ticket #244; the tool support is built 2026-11-20, the two live sends wait on Ryan's go
+status: in-progress      # ticket #244; tool support built and AusCam Club 3 merged live 2026-11-20; San Pedro waits on Ryan
 created: 2026-11-20
 intent: ticket #244 - left over from #238's November back-fill; Ryan 2026-11-19 - "build the tool support and do AusCam Club 3 first"
 ---
@@ -72,3 +72,35 @@ already has (`merge`)". Counts only here; the resolved rows are in #238's back-f
 - The tool change itself: revert the commit; the ledgers it wrote stay as the record.
 
 ## Result
+2026-11-20, times UTC. VPN checked off (Salesforce traffic over en0, no tunnel route). Ryan's go: the
+ticket comment of 2026-11-19 ("build the tool support and do AusCam Club 3 first"). Run from #244's
+worktree's `tools/sf_backfill.py` against #238's folder, passed to `--dir` by its absolute path
+(`<main checkout>/.claude/worktrees/t-238-incident-vendor-release-overwr/data/backfill_2026-11`), since
+that folder lives only in #238's worktree.
+- **Backups first**, in that folder: `before244_decisions.csv`, `before244_plan.json`,
+  `before244_sf_state.json`, `before244_held.csv`.
+- **Step 1:** the `decisions.csv` line for key `001RP00000yElpvYAC|2026-10-03` changed from `skip` to
+  `use <the week-2 report>; merge; accept club_has_earlier_contacts+more_new_girls_than_proven`, the
+  only line changed.
+- **Step 2:** `snapshot --vpn-off` at 03:09:58: 467 accounts, 2031 batches, 1851 club days with
+  attendance, 267 clubs with participants. `plan`: to send 0; to merge 1 (26 names ticked, 1 club);
+  skipped `already_in_salesforce` 2, `sent_by_this_tool` 165, `skip_decided` 1 (San Pedro
+  Sacatepequez); held 0.
+- **Step 3:** `merge --vpn-off` (dry run): the original BATCH-000498 (`a1lRP000006KPzhYAG`), 26 names
+  ticked, 8 girls to add, 0 new contacts.
+- **Step 4:** `merge --apply --vpn-off --limit 1` (one planned merge, so the same as `--only`):
+  BATCH-002047 (`a1lRP000006aiALYAY`), created 03:10:24, `Creator__c` `Jotform back-fill merge
+  001RP00000yElpvYAC <the week-2 report>`, read back `ok`: 8 rows added to BATCH-000498, 0 new
+  contacts. `merge_ledger.csv` (ok 1), `merge_added.csv` (8 attendance rows, 0 contacts).
+- **Independent read-back** through the Salesforce connector: AusCam Club 3 on 2026-10-03 has 26
+  attendance rows for 26 distinct girls, all on BATCH-000498 (its 18 and the 8). BATCH-000498 `Success`,
+  `Girls_Present__c` 26, module `Elective - Understanding our World`, week 2. BATCH-002047 `Success`,
+  `Girls_Present__c` empty, no rows of its own.
+- **Step 5:** `sf_girls_present.py check --vpn-off`: 1,855 Jotform Success batches, differ 0, without a
+  value 0 -> OK.
+- **Not done: step 6, San Pedro Sacatepequez 2026-10-17.** Its line stays `skip` until Ryan confirms
+  the report's own module (`Special Event - IDG Celebrations`, blank week) with the partner; step 6 is
+  ready as written.
+- **Rollback of the merge** (only with Ryan's go): delete the 8 rows listed in `merge_added.csv`, then
+  BATCH-002047, then set BATCH-000498's `Girls_Present__c` back to 18;
+  `close '001RP00000yElpvYAC|2026-10-03' --removed`. No contact to remove (the merge made none).
