@@ -985,7 +985,12 @@ class TimingReportsDocs(unittest.TestCase):
     reproduces the report's total (DoD: "each report's totals equal its SOQL check"): Accounts of
     record type Club with a parent and no `Attendance_Batch__c` dated `LAST_WEEK`; batches counted by
     club and `Session_Week__c`; live Jotform `Success` batches of `LAST_MONTH` with their
-    `Submission_Delay_Days__c`; `AVG` and `MAX` of the delay by partner and `Session_Month__c`. Four
+    `Submission_Delay_Days__c`; for the delay by partner and month, the live Jotform `Success` batches'
+    partner, `Session_Month__c` and `Submission_Delay_Days__c` since `N_MONTHS_AGO:11` and the floor
+    `Attendance_Date__c >= 2026-09-01` (exactly once), averaged per partner and month outside SOQL, and
+    its bullet says so and why: SOQL cannot group by the formula `Session_Month__c` (2026-11-20: the
+    `GROUP BY Account__r.Parent.Name, Session_Month__c` form answered MALFORMED_QUERY, and describe gives
+    `Session_Month__c` and `Submission_Delay_Days__c` groupable false), so that form is refused. Four
     distinct statements: one query cannot stand for two reports.
 
     And it records Ryan's answers of 2026-10-24 (ticket #102, comments): the clubs of the three
@@ -1034,12 +1039,19 @@ class TimingReportsDocs(unittest.TestCase):
              r"\bSELECT\b(?:(?!\bFROM\b).)*\bSubmission_Delay_Days__c\b"),
             ("the largest delay first (`ORDER BY Submission_Delay_Days__c DESC`)", r"\bORDER\s+BY\s+Submission_Delay_Days__c\s+DESC\b"),
         ),
+        # the runnable check (2026-11-20): the rows, averaged per partner and month outside SOQL - SOQL cannot group
+        # by the formula Session_Month__c (MALFORMED_QUERY; describe: groupable false)
         "Submission_Delay_by_Partner_by_Month": (
             BATCHES, JOTFORM, SUCCESS,
-            ("the average delay (`AVG(Submission_Delay_Days__c)`)", r"\bAVG\s*\(\s*Submission_Delay_Days__c\s*\)"),
-            ("the maximum delay (`MAX(Submission_Delay_Days__c)`)", r"\bMAX\s*\(\s*Submission_Delay_Days__c\s*\)"),
-            ("grouped by partner and session month (`GROUP BY Account__r.Parent.Name, Session_Month__c`)",
-             r"\bGROUP\s+BY\b(?=.*\bParent\.Name\b|.*\bPartner__c\b)(?=.*\bSession_Month__c\b)"),
+            ("the partner among the selected fields (`SELECT Account__r.Parent.Name ... FROM`)",
+             r"\bSELECT\b(?:(?!\bFROM\b).)*(?:\bParent\.Name\b|\bPartner__c\b)"),
+            ("the session month among the selected fields (`SELECT ... Session_Month__c ... FROM`)",
+             r"\bSELECT\b(?:(?!\bFROM\b).)*\bSession_Month__c\b"),
+            ("the delay itself among the selected fields (`SELECT ... Submission_Delay_Days__c ... FROM`, not in an aggregate)",
+             r"\bSELECT\b(?:(?!\bFROM\b).)*(?<!\()(?<!\(\s)\bSubmission_Delay_Days__c\b"),
+            ("this month and the 11 before it (`Attendance_Date__c >= N_MONTHS_AGO:11`)",
+             r"\bAttendance_Date__c\s*>=\s*N_MONTHS_AGO:11\b"),
+            ("the floor since #103's deploy (`Attendance_Date__c >= 2026-09-01`)", r"\bAttendance_Date__c\s*>=\s*2026-09-01\b(?![T:])"),
         ),
     }
     # what no tied statement may carry: a predicate that is never true, an OR, a LIMIT or HAVING
@@ -1074,8 +1086,19 @@ class TimingReportsDocs(unittest.TestCase):
         "Submission_Delay_by_Partner_by_Month": (
             NO_LITERAL_PERIOD_BUT_FLOOR,
             ("the floor once (`Attendance_Date__c >= 2026-09-01` at most one time)", rf"(?:{FLOOR}).*(?:{FLOOR})"),
+            ("no `GROUP BY ... Session_Month__c` (SOQL cannot group by the formula: MALFORMED_QUERY, 2026-11-20)",
+             r"\bGROUP\s+BY\b.*\bSession_Month__c\b"),
+            ("no aggregate (`AVG(`, `MAX(`, `COUNT(`): beside the plain fields, without that GROUP BY, SOQL refuses it",
+             r"\b(?:AVG|MAX|MIN|SUM|COUNT|COUNT_DISTINCT)\s*\("),
         ),
     }
+    # the delay report's bullet says the averaging is done outside SOQL, and why: Session_Month__c cannot be grouped
+    OUTSIDE_SOQL = (r"\b(?:averag|aggregat|summari[sz])\w*\b[^.;,:()]{0,80}?\b(?:in (?:a |the )?(?:Python |shell )?script|"
+                    r"outside (?:of )?SOQL|in Python|client[- ]side|by (?:a |the )?script|after the query|by hand|locally)\b|"
+                    r"\b(?:in (?:a |the )?(?:Python )?script|outside (?:of )?SOQL|in Python|client[- ]side)\b[^.;,:()]{0,80}?"
+                    r"\b(?:averag|aggregat|summari[sz])\w*")
+    NOT_GROUPABLE = (r"\b(?:cannot|can't|can ?not|refus\w*|rejects?|not groupable|isn't groupable|not be grouped|"
+                     r"groupable\W+false|MALFORMED_QUERY|not allowed|unsupported|does not support|doesn't support)\b")
     # the Parent.Name exclusion's names: inside `Parent.Name NOT IN (...)`, or each `Parent.Name != '...'`
     EXCLUSION = re.compile(r"\bParent\.Name\s+NOT\s+IN\s*\(([^)]*)\)|\bParent\.Name\s*(?:!=|<>)\s*('(?:[^'\\]|\\.)*')")
     # a report said to be in another folder: "in the Decommissioned folder", "under folder Private Reports" (case matters:
@@ -1207,6 +1230,18 @@ class TimingReportsDocs(unittest.TestCase):
                 passing[report] = next(stmt for stmt in found if not self.missing(report, stmt))
         self.assertEqual(len(set(passing.values())), len(passing),
                          f"{where}: one SOQL check per report - the same statement stands beside two reports")
+        # the delay report's check is rows, averaged outside SOQL: its block (bullet, paragraph, row) says so, affirmed,
+        # and why - a sentence naming `Session_Month__c` and the grouping SOQL refuses; the statement itself not counted
+        delay = "Submission_Delay_by_Partner_by_Month"
+        units = [re.sub(r"`\s*SELECT\b[^`]*`", "`<the check>`", prose(b)) for b in blocks(part)
+                 if re.search(rf"\b{delay}\b", b) and STATEMENT.search(b)]
+        said = [s for u in units for s in sentences(u, ".;")]
+        self.assertTrue([s for s in said if affirms(s, self.OUTSIDE_SOQL)],
+                        f"{where}: beside `{delay}`'s check, say the delay is averaged per partner and month outside SOQL "
+                        "(in a script), with no negation right before it")
+        self.assertTrue(self.saying(said, r"\bSession_Month__c\b", r"\bgroup\w*", self.NOT_GROUPABLE),
+                        f"{where}: beside `{delay}`'s check, say why the averaging is outside SOQL: SOQL cannot group by "
+                        "the formula `Session_Month__c`, in one sentence")
 
     def test_the_runbook_says_who_is_left_out_of_the_weekly_lists(self):
         part = self.section()
