@@ -76,7 +76,9 @@
 #   anything else - ; or || for &&, an assignment or .env before it, an inline VPN probe, a pipe
 #   into python3 -, a script, sh or tee, a redirect - is judged as before. The self-approvals, the
 #   forgeries and the delete words still read the whole command, wrappers included (a wrapped
-#   query whose text says delete asks), and the log and the prompt show it whole.
+#   query whose text says delete asks), and the log and the prompt show it whole; the files and
+#   folders read for a delete (sf apex run's file, a deploy's destructiveChanges*.xml) are the ones
+#   the wrapped command names, from the cd's folder, never a wrapper's own words.
 #
 # The automatic go needs ALL of:
 #   - one simple command: none of ; & | ` $( <( > # or a line break (a
@@ -816,9 +818,11 @@ if has '--prune|delete|remove|destructive|(^|[[:space:]])--(p|pr|pru|prun|r|re|r
   not_automatic "A delete or --prune: it asks whatever the backups (ticket #146)."
 fi
 
-# the command's words, quotes and backslashes removed (for the flags and paths read below)
+# the command's words, quotes and backslashes removed (for the flags and paths read below) - what a
+# wrapper wraps (#251): the wrapper's own words (the cd's folder, a jq filter) are no file or folder
+# the wrapped command names (INNER has no line break: bare of it is the BARE texts gives it)
 set -f
-WORDS=($BARE)
+if [ -n "$WRAPPED" ]; then WORDS=($(bare "$INNER")); else WORDS=($BARE); fi
 set +f
 words() { [ ${#WORDS[@]} -gt 0 ] && printf '%s\n' "${WORDS[@]}"; }
 # the checkout and the working folder (locate, above); what a wrapper's cd wraps runs in the
@@ -922,14 +926,12 @@ fi
 # #251: a wrapped command with nothing live in its text and no pass: no decision, as alone
 [ -z "$MATCH" ] && exit 0
 
-# #251: from here on what a wrapper wraps is judged as it is alone (from the folder its cd names)
+# #251: from here on what a wrapper wraps is judged as it is alone (from the folder its cd names;
+# WORDS are its words already)
 if [ -n "$WRAPPED" ]; then
   CMD=$INNER
   texts
   apis
-  set -f
-  WORDS=($BARE)
-  set +f
 fi
 
 # ---- a WRITE: automatic when it is one simple command, recognised, and backed up today

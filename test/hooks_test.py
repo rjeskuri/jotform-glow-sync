@@ -314,10 +314,12 @@ class LiveGateWrappers(HookFixture, unittest.TestCase):
     JQ = "jq '.result.totalSize'"
     PY = "python3 -c 'import json, sys; print(json.load(sys.stdin)[\"result\"][\"totalSize\"])'"
 
-    def wrapper_project(self):
+    def wrapper_project(self, destructive=False):
         """A clean committed checkout (appsscript/; drive-sync/ beside it, another clasp project), form
         F1's backup from today, the plan data/sf_x/ with its before/ from today and data/sf_y/ with none,
-        a worktree folder under .claude/worktrees/, and a sibling folder <checkout>-elsewhere."""
+        a worktree folder under .claude/worktrees/, and a sibling folder <checkout>-elsewhere. With
+        destructive: a destructiveChanges.xml in a past plan's folder (data/sf_old/del/) that no deploy
+        here names, and the plan data/sf_z/ - its before/ from today - whose after/ holds one."""
         p = self.project(git=True)
         self.back_up(p, "jotform", self.F1, f"backups/{self.F1}")
         self.salesforce_before(p, "data/sf_x/before/Contact.object-meta.xml")
@@ -326,6 +328,11 @@ class LiveGateWrappers(HookFixture, unittest.TestCase):
         self.write(p, "drive-sync/.clasp.json", '{"scriptId": "fictional-drive-sync", "rootDir": "."}\n')
         self.write(p, ".claude/worktrees/t-9-fictional/README.md", "A fictional worktree.\n")
         os.makedirs(p + "-elsewhere")
+        if destructive:
+            self.write(p, "data/sf_old/del/destructiveChanges.xml", "<Package/>\n")
+            self.salesforce_before(p, "data/sf_z/before/Contact.object-meta.xml")
+            self.write(p, "data/sf_z/after/main/default/reports/Attendance.report-meta.xml", "<Report/>\n")
+            self.write(p, "data/sf_z/after/destructiveChanges.xml", "<Package/>\n")
         return p
 
     def transparent(self, p):
@@ -395,21 +402,18 @@ class LiveGateWrappers(HookFixture, unittest.TestCase):
         """The reason's first word: PASSED (#204), AUTO-APPROVED (#146), LIVE (the prompt), BLOCKED."""
         return (self.reason(run).split() or [""])[0]
 
-    def test_a_safe_wrapper_is_judged_as_the_command_it_wraps_and_any_other_is_not(self):
-        # DoD: a leading in-repo cd, a leading scripts/vpn_check.sh and a read-only trailing jq or python3
-        # -c are transparent, the wrapped command judged as it would be alone; a cd outside the
-        # repository, a wrapper around a delete and any other prefix still ask. Each transparent row is run
-        # wrapped and alone (the control): both get the verdict named, with the same kind of reason
-        p = self.wrapper_project()
+    def as_alone(self, p, rows):
+        """The gate's cases for transparent rows (transparent's shape) in `p`: each wrapped, then alone."""
         where = lambda rel: os.path.normpath(os.path.join(p, rel))
-        rows, others = self.transparent(p), self.opaque(p)
         cases = []
         for wrapped, cwd, alone, alone_cwd, _verdict, _kind in rows:
             cases += [(wrapped, dict(project=p, cwd=where(cwd), may_allow=True)),
                       (alone, dict(project=p, cwd=where(alone_cwd), may_allow=True))]
-        cases += [(command, dict(project=p, cwd=where(cwd), may_allow=True)) for command, cwd, _ in others]
-        cases.append((self.CHECK, dict(project=p, cwd=p, may_allow=True)))
-        runs = self.verdicts(cases)
+        return cases
+
+    def check_as_alone(self, rows, runs):
+        """Each row's run wrapped and alone (the control), from as_alone's cases: both get the verdict
+        named, the wrapped one the same kind of reason; the runs it read."""
         for n, (wrapped, _cwd, alone, alone_cwd, verdict, kind) in enumerate(rows):
             (_, _, run), (_, _, control) = runs[2 * n], runs[2 * n + 1]
             with self.subTest(command=wrapped):
@@ -419,7 +423,21 @@ class LiveGateWrappers(HookFixture, unittest.TestCase):
                 self.assertEqual(self.first_word(run), kind, "not the answer the command alone gets - " + self.show(run))
                 if verdict == "ask":
                     self.check_reason(wrapped, self.reason(run))
-        for (command, _cwd, verdict), (_, _, run) in zip(others, runs[2 * len(rows):]):
+        return runs[2 * len(rows):]
+
+    def test_a_safe_wrapper_is_judged_as_the_command_it_wraps_and_any_other_is_not(self):
+        # DoD: a leading in-repo cd, a leading scripts/vpn_check.sh and a read-only trailing jq or python3
+        # -c are transparent, the wrapped command judged as it would be alone; a cd outside the
+        # repository, a wrapper around a delete and any other prefix still ask. Each transparent row is run
+        # wrapped and alone (the control): both get the verdict named, with the same kind of reason
+        p = self.wrapper_project()
+        where = lambda rel: os.path.normpath(os.path.join(p, rel))
+        rows, others = self.transparent(p), self.opaque(p)
+        cases = self.as_alone(p, rows)
+        cases += [(command, dict(project=p, cwd=where(cwd), may_allow=True)) for command, cwd, _ in others]
+        cases.append((self.CHECK, dict(project=p, cwd=p, may_allow=True)))
+        rest = self.check_as_alone(rows, self.verdicts(cases))
+        for (command, _cwd, verdict), (_, _, run) in zip(others, rest):
             with self.subTest(command=command):
                 if verdict == "ask":
                     self.assertEqual(self.verdict(run), "ask", "a wrapper that is none - " + self.show(run))
@@ -427,8 +445,31 @@ class LiveGateWrappers(HookFixture, unittest.TestCase):
                 else:
                     self.assertNotEqual(self.verdict(run), "allow", "a pipe that is no read-only filter - " + self.show(run))
         with self.subTest(command=self.CHECK):
-            self.assertEqual(self.verdict(runs[-1][2]), "silent", "the VPN check alone: no decision (the settings "
-                                                                  "allow it) - " + self.show(runs[-1][2]))
+            self.assertEqual(self.verdict(rest[-1][2]), "silent", "the VPN check alone: no decision (the settings "
+                                                                  "allow it) - " + self.show(rest[-1][2]))
+
+    def test_a_wrapper_s_own_words_name_no_deploy_folder(self):
+        # DoD (the wrapped command judged as it would be alone; PR #254's review, medium): the folders a
+        # deploy names, searched for a destructiveChanges*.xml, are the wrapped command's - not the cd's
+        # destination nor a jq filter (.) read as a folder - so a destructiveChanges.xml elsewhere in the
+        # checkout (data/sf_old/del/) changes nothing; one in the folder the wrapped deploy names still
+        # makes it a delete that asks, where without it the plan's before/ from today is the automatic go
+        p = self.wrapper_project(destructive=True)
+        dry = "sf project deploy start --dry-run -d data/sf_y/after -o glow --json"
+        own = "sf project deploy start --source-dir data/sf_z/after -o glow"   # data/sf_z/after/destructiveChanges.xml
+        rows = [
+            (f"cd {p} && {self.BACKED}", "data", self.BACKED, ".", "allow", "AUTO-APPROVED"),
+            (f"{dry} | jq .", ".", dry, ".", "allow", "PASSED"),
+            ("cd data && sf project deploy start --dry-run -d sf_y/after -o glow", ".",
+             "sf project deploy start --dry-run -d sf_y/after -o glow", "data", "allow", "PASSED"),
+            # the safety side: its own folder's destructiveChanges.xml asks, wrapped as alone
+            (f"cd {p} && {own}", "data", own, ".", "ask", "LIVE"),
+        ]
+        runs = self.verdicts(self.as_alone(p, rows))
+        self.check_as_alone(rows, runs)
+        with self.subTest(command=rows[-1][0]):
+            self.assertIn("delet", self.reason(runs[-2][2]).lower(), "the ask does not call it a delete - "
+                          + self.show(runs[-2][2]))
 
 
 class GateSettings(unittest.TestCase):
