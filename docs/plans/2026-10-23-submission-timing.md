@@ -1,7 +1,7 @@
 ---
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
-status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 puts them on the dashboard: built 2026-11-20, deploy on Ryan's go ("Task #103: the timing on the dashboard")
+status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 put them on the dashboard: deployed 2026-11-20 03:06 UTC ("Task #103: the timing on the dashboard")
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
@@ -585,3 +585,19 @@ DECISIONS 2026-10-21), never deleted. Revert this task's RUNBOOK change with it.
   - **`0AfRP000002khDh0AI` Succeeded 3/3 on `build/`** (22 components), so `build_sibling/` is
     not used.
   - Ryan's go (2026-11-20): deploy once a fresh review has no high or medium finding.
+- 2026-11-20, Rollout 4-8:
+  - **Deployed: `0AfRP000002khIX0AY`, 03:06:50 UTC, 3/3 (Ryan's go).** The read-back into
+    `after/` (the dashboard and the two reports) equals `build/`. The dashboard was refreshed
+    unfiltered, then with the Partner filter on AusCam Freedom Project Inc.
+  - Each new component against SOQL, under All and then under that partner:
+    - "Clubs not submitting" (last week) and its by-partner table: 201 and 201, then 3 and 3.
+      They equal the SOQL count with #216's `Obsolete_Record__c = false`, which the report has.
+    - "Average days from session to submission" (last month): 5.37 over 893 batches, then 0.57
+      over 7. Both equal the SOQL average.
+    - The chart: 81 partner-month cells, 0 differ from the SOQL averages with the 2026-09-01
+      floor (overall 6.078 over 1,310 batches). Under the partner's filter, 2026-10 is 0.57 and
+      2026-11 is 0, both as SOQL.
+  - The new metric shares the header "Clubs not submitting" with two existing tiles (14 days and
+    since 1 Sept); its footer "last week" tells them apart.
+  - The RUNBOOK's check for `Submission_Delay_by_Partner_by_Month` gains its floor and is now
+    summed in a script, because SOQL cannot group by `Session_Month__c`.

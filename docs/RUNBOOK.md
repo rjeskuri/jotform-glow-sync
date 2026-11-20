@@ -3380,7 +3380,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)); #103, the submission timing (below): built 2026-11-20 from the fresh retrieve of 2026-11-19, not deployed yet ([plan](plans/2026-10-23-submission-timing.md#task-103-the-timing-on-the-dashboard)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)); #103, the submission timing (below): deployed on Ryan's go 2026-11-20 03:06 UTC (`0AfRP000002khIX0AY`, check-only `0AfRP000002khDh0AI`), read back equal to `build/`, every new component checked against SOQL ([plan](plans/2026-10-23-submission-timing.md#task-103-the-timing-on-the-dashboard)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -3447,19 +3447,8 @@ the club-by-date table, and the timing in the "How to read this dashboard" box b
   have no submission time, so no delay. The average is over every Jotform submission of last
   month, and the chart has a bar per session month since 1 September 2026. There is no threshold:
   nothing is flagged as late, staff read the days.
-- **A second layout, `build_sibling/`**, waits on the check-only: the dashboard has 18 components
-  (17 reports and the box), and the four make 22. Salesforce's limit on components (20 or 25) was
-  not confirmed offline. If the check-only refuses `build/` for it, `build_sibling/` puts the four
-  on a new dashboard "Attendance Submissions" (`Attendance/Attendance_Submissions`, in the
-  Attendance folder, with the same Partner and Region filters and running user), whose own "How to
-  read this dashboard" box carries the timing; the Jotform Attendance box then gains one bullet
-  naming it instead. The bullet names the dashboard and does not link it: its Id exists only after
-  the deploy.
-
-**The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
-deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
-API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describes the build, and
-`after/` beside it is the read-back):
+- **A second layout, `build_sibling/`**, was built in case Salesforce refused 22 components. It
+  is not used: check-only `0AfRP000002khDh0AI` passed `build/` with all 22 (2026-11-20).
 - Since 2026-10-21 (#59) the top row is two tiles headed "Girls who attended (Jotform + 3
   partners)", one for last month and one for this month so far.
 - Each tile is the month's girls who attended, Jotform and the three partners together; how it is
@@ -4016,14 +4005,14 @@ login `glow` or the read-only connector; counts and partner names only):
   bar chart) answers how long each partner's clubs take, month by month: the average and the
   maximum of `Submission_Delay_Days__c` over the live Jotform batches, by partner and session
   month (`Session_Month__c`), this month and the 11 before it (`N_MONTHS_AGO:11`); the chart shows
-  the average, a bar per partner and month. Check: `SELECT Account__r.Parent.Name,
-  Session_Month__c, AVG(Submission_Delay_Days__c), MAX(Submission_Delay_Days__c), COUNT(Id) FROM
-  Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
-  Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
-  #103's build gives the report a floor, session dates from 2026-09-01 (Ryan, 2026-10-26: it drops
-  the February-March 2026 pilot batches of its blank-partner group); once that is deployed with the
-  dashboard, the check adds `AND Attendance_Date__c >= 2026-09-01` to its `WHERE` ("Attendance
-  dashboard in Salesforce", Submission timing).
+  the average, a bar per partner and month. Check (averaged per partner and month in a script: SOQL refuses to group by the formula
+  `Session_Month__c`, HTTP 400 on 2026-11-20): `SELECT Account__r.Parent.Name, Session_Month__c,
+  Submission_Delay_Days__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND
+  Processing_Status__c = 'Success' AND Attendance_Date__c >= 2026-09-01 AND Attendance_Date__c >=
+  N_MONTHS_AGO:11`. Since #103's deploy (2026-11-20) the report has a floor, session dates from
+  2026-09-01 (Ryan, 2026-10-26: it drops the February-March 2026 pilot batches of its blank-partner
+  group), hence the check's `>= 2026-09-01` ("Attendance dashboard in Salesforce", Submission
+  timing).
 
 Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
 (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
