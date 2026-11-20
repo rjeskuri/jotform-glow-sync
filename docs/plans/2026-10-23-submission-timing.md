@@ -574,5 +574,14 @@ DECISIONS 2026-10-21), never deleted. Revert this task's RUNBOOK change with it.
 ### Result
 
 - 2026-11-20: built offline (Build, above) from the fresh retrieves of 2026-11-19 (the dashboard)
-  and 2026-11-20 (the three reports and the report type, read only, VPN off). Nothing validated or
-  deployed; Rollout steps 1-8 wait for Ryan's go.
+  and 2026-11-20 (the three reports and the report type, read only, VPN off).
+- 2026-11-20, Rollout 1-2:
+  - The same-day retrieve into `before/` equals `dashboard_before/` and `reports_before/`.
+  - Check-only `0AfRP000002khAT0AY` refused the chart header. It was 84 characters; the live
+    headers run to 77. The header is now "Average days from session to submission, by partner and
+    month (since 1 Sept)".
+  - Check-only `0AfRP000002khC50AI` refused `showPicturesOnCharts` on the BarGrouped chart
+    (horizontal bars only). It was dropped. Both fixes went into `build/` and `build_sibling/`.
+  - **`0AfRP000002khDh0AI` Succeeded 3/3 on `build/`** (22 components), so `build_sibling/` is
+    not used.
+  - Ryan's go (2026-11-20): deploy once a fresh review has no high or medium finding.

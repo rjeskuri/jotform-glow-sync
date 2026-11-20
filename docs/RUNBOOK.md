@@ -3428,8 +3428,8 @@ the club-by-date table, and the timing in the "How to read this dashboard" box b
   opens the report, each submission with its days, the largest first within each partner. The
   report gains an Average summary on the delay column for it (a metric shows only a summary its
   report defines).
-- The bar chart "Average days from session to submission, by partner and session month (since 1
-  Sept)" reads `Submission_Delay_by_Partner_by_Month`: the average of `Submission_Delay_Days__c`
+- The bar chart "Average days from session to submission, by partner and month (since 1 Sept)"
+  reads `Submission_Delay_by_Partner_by_Month`: the average of `Submission_Delay_Days__c`
   by partner, one bar per session month (`Session_Month__c`). #103 gives that report a floor,
   session dates from 2026-09-01 like the other attendance reports (Ryan, 2026-10-26), beside its
   window of this month and the 11 before it; the floor drops the February-March 2026 pilot batches,
