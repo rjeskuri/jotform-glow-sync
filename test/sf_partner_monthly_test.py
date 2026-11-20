@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 sys.path.insert(0, os.path.join(REPO, "test", "fixtures"))
 import make_fixture                                        # noqa: E402  (the invented name pools)
 import sf_partner_monthly as spm                           # noqa: E402
+import helpers                                             # noqa: E402,F401  the VPN check's stand-in (#251)
 
 EEFY, TLM, NGAA = "Education and English for You", "Tumaini La Maisha", "Ng'aa Maskani"
 PARTNERS = [EEFY, TLM, NGAA]

@@ -29,6 +29,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_dupes as sd                  # noqa: E402
+import helpers                         # noqa: E402,F401  the VPN check's stand-in (#251)
 from glow import forms                 # noqa: E402
 from glow.jotform import Client, JotformError   # noqa: E402
 from glow import salesforce            # noqa: E402

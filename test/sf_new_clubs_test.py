@@ -18,6 +18,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_new_clubs as sfn            # noqa: E402
+import helpers                        # noqa: E402,F401  the VPN check's stand-in (#251)
 from glow import salesforce          # noqa: E402
 
 CLUB, HOUSE, OTHER = sfn.CLUB_RECORD_TYPE, sfn.PARTNER_RECORD_TYPE, "012000000000000OTH"
