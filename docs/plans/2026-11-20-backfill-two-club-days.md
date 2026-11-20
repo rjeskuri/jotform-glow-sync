@@ -52,11 +52,15 @@ already has (`merge`)". Counts only here; the resolved rows are in #238's back-f
    live gate then asks Ryan rather than passing it on its own; with one planned merge `--limit 1` is the
    same): read back `ok`.
 5. `python3 tools/sf_girls_present.py check` (differ 0) and `sf_backfill.py --dir data/backfill_2026-11 status`.
-6. **San Pedro Sacatepequez**, after Ryan confirms the report's own module with the partner: remove the
-   `skip` on key `001RP00000yEn04YAC|2026-10-17`, `snapshot --vpn-off`, `plan` (queued with a blank week),
-   `send --vpn-off` (dry run), `send --apply --vpn-off --only '001RP00000yEn04YAC|2026-10-17'` (the fetch
-   must be under `MAX_AGE_HOURS` old: run the resolver again first if it is not), then
-   `sf_girls_present.py check`.
+6. **San Pedro Sacatepequez**, after Ryan confirms the report's own module with the partner: change the
+   `decisions.csv` line for key `001RP00000yEn04YAC|2026-10-17` from `skip` to
+   `accept club_has_earlier_contacts`. Without it `plan` still holds the session: the club has 15
+   participants in Salesforce, none made by this tool (#238 only showed `module_not_usable` because that
+   hold comes first). With it Ryan accepts that a girl whose name is spelled differently in the report
+   than on her Contact becomes a second Contact. Then `snapshot --vpn-off`, `plan` (queued: 11 names, a
+   blank week, year 1, nothing else held), `send --vpn-off` (dry run),
+   `send --apply --vpn-off --only '001RP00000yEn04YAC|2026-10-17'` (the fetch must be under
+   `MAX_AGE_HOURS` old: run the resolver again first if it is not), then `sf_girls_present.py check`.
 
 ## Rollback (only with Ryan's go)
 - AusCam: by id from `merge_added.csv` - the attendance rows the merge added to `BATCH-000498`, then each
