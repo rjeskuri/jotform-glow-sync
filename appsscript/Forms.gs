@@ -16,8 +16,10 @@
  *
  * Run `createGlowForms` once from the GLOW menu (it is idempotent: forms
  * that already exist are reused). The form handlers keep the dropdowns
- * current (syncFormChoices after each change); after a change made any other
- * way, run "Update form dropdowns from the Roster" (syncFormChoicesFromMenu).
+ * current (syncFormChoices after each change) and an hourly trigger
+ * (syncFormChoicesHourly, installed by installTriggers) catches a change made
+ * any other way; for at once, run "Update form dropdowns from the Roster"
+ * (syncFormChoicesFromMenu).
  *
  * The forms are owned by whoever runs this, live in their Drive, and can be
  * edited in the normal Forms UI — but question TITLES must stay as in
@@ -286,8 +288,9 @@ function createRosterForm_(ss, feedback, made) {
  * one section per partner holding only that partner's active clubs. New
  * partners get a new section; nothing is removed (a partner whose clubs all
  * went inactive keeps a section, which the dropdown still routes to).
+ * `quiet` (the hourly run): write the Audit row only when something changed.
  */
-function syncFormChoices() {
+function syncFormChoices(quiet) {
   const form = existingForm_(PROP.ROSTER_FORM);
   if (!form) return 0;
   const partners = partnerChoices_();
@@ -360,8 +363,19 @@ function syncFormChoices() {
     return partnerMod.createChoice(p, sections[key_(p)]);
   }));
 
-  audit_('syncFormChoices', changed + ' dropdown(s) updated');
+  if (changed || !quiet) audit_('syncFormChoices', changed + ' dropdown(s) updated');
   return changed;
+}
+
+/**
+ * Time-driven (installTriggers, every hour): syncFormChoices under the
+ * document lock, so a change made outside the form handlers (a tool, a hand
+ * edit of the Roster) reaches the Club Roster Form without the menu. A busy
+ * lock skips this run quietly (the next one catches up), and the Audit row is
+ * written only when a dropdown changed.
+ */
+function syncFormChoicesHourly() {
+  withDocumentLock_(30000, function () { syncFormChoices(true); });
 }
 
 /**

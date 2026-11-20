@@ -278,6 +278,8 @@ class RenameClub(unittest.TestCase):
         self.assertNotIn("rename the club's Account to the new name FIRST", out)
         self.assertIn("no roster question was renamed", out)
         self.assertIn("CREATE roster 'Stars Juniors'", out)
+        self.assertIn("hourly", out.lower())                 # ticket #228: the rename's own hint
+        self.assertIn("Update form dropdowns", out)
         # the owner of the question renames its own club as ever, namesake or not: the
         # question's girls are its Roster rows' (any status)
         sheet, forms = self.stars_sheet(), self.StarsForms()
@@ -388,7 +390,10 @@ class RenameClub(unittest.TestCase):
         audit = sheet.tabs["Audit"][-1]
         self.assertEqual(audit[1], "moveClub")
         self.assertIn("2 Roster rows, ClubRegistry SUNRISEC kept", audit[2])
-        self.assertIn("GLOW -> Google Forms -> Update form dropdowns", out)
+        # ticket #228: an hourly trigger refreshes the dropdowns; the menu is the way to do it at once
+        self.assertIn("hourly", out.lower())
+        self.assertIn("Update form dropdowns", out)
+        self.assertNotIn("In the sheet, now:", out)
 
     def test_move_dates_the_audit_and_the_note_in_the_sheets_zone(self):
         # 03:30 UTC on 09-30 is still 09-29 in New York (the patched sheet zone), whatever
@@ -802,7 +807,9 @@ class DeactivateClubs(unittest.TestCase):
                                    "2026-10-07 - tools/deactivate_clubs.py (no reports (test))")
         self.assertEqual(len(self.written), 1)
         self.assertIn("Next (docs/RUNBOOK.md, \"Deactivating a club\")", out)
+        self.assertIn("hourly", out.lower())                 # ticket #228
         self.assertIn("Update form dropdowns from the Roster", out)
+        self.assertNotIn("In the sheet, now:", out)
         self.assertIn("--undo", out)
         for name in ("Eve Hoe", "Ida Toe", "Dee Koe"):
             self.assertNotIn(name, out)
@@ -900,6 +907,7 @@ class DeactivateClubs(unittest.TestCase):
             self.assertIn("tools/deactivate_clubs.py --undo", audit[2])
             self.assertTrue(any(d.startswith("undo-") for d in os.listdir(folder)), os.listdir(folder))
             self.assertIn("Update form dropdowns", text)
+            self.assertIn("hourly", text.lower())            # ticket #228
             # run again: the rows are active now, so every one of them "changed"
             code, _ = self.run_main(["--undo", folder, "--apply"], sheet, key=None)
             self.assertIn("rows 6-8 changed since the run of", str(code))

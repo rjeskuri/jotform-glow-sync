@@ -1856,5 +1856,30 @@ class GirlsAttendedTilesRunbook(AttendanceDocs, unittest.TestCase):
                          "docs/DECISIONS.md 2026-10-15: add a dated bullet pointing at the new rule, e.g. \"- 2026-10-20: "
                          "amended - total attendance is no longer tracked; the tiles are girls who attended (#59)\"")
 
+
+class HourlyRefreshRunbook(unittest.TestCase):
+    """Ticket #228: an hourly Apps Script trigger refreshes the Club Roster Form's dropdowns, so a
+    club rename, a deactivation or a move no longer waits for the menu run (the menu stays, for at
+    once). The procedures say so."""
+    RUNBOOK = os.path.join(REPO, "docs", "RUNBOOK.md")
+    DECISIONS = os.path.join(REPO, "docs", "DECISIONS.md")
+    SECTIONS = ("## Renaming a club", "## Moving a club to another partner", "## Deactivating a club")
+
+    def test_each_club_procedure_says_the_dropdowns_refresh_hourly_and_the_menu_does_it_at_once(self):
+        for heading in self.SECTIONS:
+            part = flat(md_part(self.RUNBOOK, heading))
+            self.assertRegex(part, r"(?i)\bhourly\b|\bevery hour\b", f"RUNBOOK {heading}: say the refresh is hourly")
+            self.assertIn("Update form dropdowns", part, f"RUNBOOK {heading}: keep the menu as the way to do it at once")
+
+    def test_a_decision_records_the_hourly_refresh(self):
+        entries = re.split(r"(?m)^(?=### )", read(self.DECISIONS))[1:]
+        new = [e for e in entries if re.match(r"### 2026-1[12]-\d\d", e)
+               and re.search(r"(?<![\w#])#228\b", e) and re.search(r"(?i)\bhourly\b", e)]
+        self.assertTrue(new, "docs/DECISIONS.md: no `### 2026-11-… — …` entry for ticket #228 (the hourly dropdown refresh)")
+        self.assertIn("syncFormChoicesHourly", new[0], "the entry names the handler")
+        for part in ("**Why", "**Rejected", "**Consequences"):
+            self.assertIn(part, new[0], f"docs/DECISIONS.md #228: no {part}** bullet (the file's header)")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

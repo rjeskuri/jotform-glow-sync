@@ -1686,17 +1686,18 @@ yet.
 
 The club keeps its `club_code`, so the girls' ids do not change (`Ids.gs`).
 `--apply` saves the tabs under `data/rename_club/<stamp>/` and snapshots the
-forms first; the rollback is those CSVs and `restore_conditions.py`. Then, in
-the sheet, **GLOW → Google Forms → Update form dropdowns from the Roster** so
-the Modification form offers the new name (it also refreshes on the next
-submission). Attendance already submitted under the old name keeps it.
+forms first; the rollback is those CSVs and `restore_conditions.py`. Then the
+Club Roster Form offers the new name with the hourly refresh (it also refreshes
+on the next submission); for at once, in the sheet, **GLOW → Google Forms →
+Update form dropdowns from the Roster**. Attendance already submitted under the
+old name keeps it.
 
 ## Moving a club to another partner (a mistyped partner)
 
 - **When:** a club filed under a misspelled partner of its own (the old free-text enrollment).
 - **Status:** done once, 2026-09-28 ([Result](plans/2026-09-24-move-club-partner.md#result)).
 - **Dry run:** `rename_club.py --partner … --club … --new-partner …`.
-- **Apply:** the same with `--apply` (it reads Jotform first), then the dropdown refresh at once.
+- **Apply:** the same with `--apply` (it reads Jotform first); the dropdowns follow with the hourly refresh, or **Update form dropdowns from the Roster** for at once.
 - **Verify:** the ReviewQueue, a form preview, `auto_sync.py --region` in-sync, `form_status` CLEAN.
 - **Rollback:** the last bullet of "What the tool does and guards".
 
@@ -1717,9 +1718,11 @@ The dry run can take `--sheet-only`; the `--apply` cannot, because it first
 reads the region's form and the template (`JOTFORM_API_KEY`) to make sure no
 rule shows the club only for a typed Partner.
 
-Then, in the sheet, **straight away**: **GLOW → Google Forms → Update form
-dropdowns from the Roster**. A direct sheet write triggers nothing. Until
-the refresh, a change sent through the typo's section is skipped as "club not
+Then the Club Roster Form follows with the hourly refresh (an Apps Script
+trigger, `syncFormChoicesHourly`); in the sheet, **GLOW → Google Forms →
+Update form dropdowns from the Roster** does it at once, and is the way to
+close the window before a partner sends a change. A direct sheet write
+triggers nothing by itself. Until the refresh, a change sent through the typo's section is skipped as "club not
 on file": it is never retried ("Process any missed form responses" treats it
 as done), and the mentor gets no confirmation. So afterwards, look in the
 ReviewQueue for "Roster change for a club not on file" under the typo, and
@@ -2163,7 +2166,7 @@ is one monthly batch on the partner account, never per club (2026-10-19,
 - **When:** a club whose girls stopped coming; a whole region's clubs, after its form is disabled.
 - **Status:** built 2026-10-07 ([plan](plans/2026-10-06-clubs-off-jotform.md), C).
 - **Dry run:** `tools/deactivate_clubs.py --partner … --check-only`, then without `--apply`.
-- **Apply:** `--reason … --apply`, Ryan's go; then the dropdown refresh, and the club's Salesforce Account flagged `Obsolete_Record__c` (one record, Ryan's go) so the not-submitted lists leave it out ("Duplicate and obsolete records in Salesforce").
+- **Apply:** `--reason … --apply`, Ryan's go; then the dropdown refresh (hourly, or the menu **Update form dropdowns from the Roster** for at once), and the club's Salesforce Account flagged `Obsolete_Record__c` (one record, Ryan's go) so the not-submitted lists leave it out ("Duplicate and obsolete records in Salesforce").
 - **Verify:** the template's sync dry run plans `~ retired roster …` from the day after.
 - **Rollback:** `--undo data/deactivate_clubs/<stamp>` (below).
 
@@ -2223,9 +2226,9 @@ What the tool does and guards:
 - **Not touched:** ClubRegistry (the code is immutable; `Ids.gs` finds it by
   partner + club when the club comes back), SF Pending (the Accounts exist),
   the Partners tab (the partners stay, with their region), the forms.
-- **Afterwards, in the sheet, now:** **GLOW → Google Forms → Update form
-  dropdowns from the Roster**, so the Club Roster Form reads `(no active
-  clubs)` for the partner; until then it still offers the clubs, and a change
+- **Afterwards:** the hourly refresh makes the Club Roster Form read
+  `(no active clubs)` for the partner; **GLOW → Google Forms → Update form
+  dropdowns from the Roster** does it at once. Until then it still offers the clubs, and a change
   sent for one runs against the inactive rows and puts girls back by name.
   Then `python3 tools/sheets_client.py export Roster data/roster_<date>.csv`
   and the template's sync dry run (`python3 sync_attendance_form.py
@@ -2324,7 +2327,7 @@ trigger's hour, which follows the script project's zone
 | **Same name listed twice** | Only one girl is on the Roster. Ask the partner: two girls → ADD the second with a mark, e.g. `Jane Doe (B)` (the first keeps her ID); one girl typed twice → `resolved …: one girl, no change`. Never resubmit through "Enroll a NEW club". |
 | **Partner says two girls share a name** | The partner answered Yes but no name repeats. Compare their note with the club's Roster rows: listed distinctly → resolved, no change; one missing → ADD her with a mark as above. |
 | **Girls missing from the latest enrollment** | "Enroll a NEW club" was sent for a club already on file; the girls not in that list stay active. Ask the partner who has left and REMOVE them as above. If the new list was not this club's at all (Radiant Girls, 2026-08-31), REMOVE the rows it added as above: the names whose Roster `source` is that response row (Ryan's go). |
-| **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), run **GLOW → Google Forms → Update form dropdowns from the Roster**, then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
+| **Roster change for a club not on file** | Nothing changed, the mentor got no confirmation, and it is never retried. Find the club under another name or partner ("Renaming a club", "Moving a club to another partner"), wait for the hourly dropdown refresh (or run **GLOW → Google Forms → Update form dropdowns from the Roster** for at once), then enter the change from the response row (or ask the partner) and tell the mentor. A truly new club uses "Enroll a NEW club". |
 | **Partner has no region** | Its girls reach no attendance form. A misspelled partner → "Moving a club to another partner". Otherwise set the Partners-tab region (`Africa`, `Asia`, `Latin America`, `U.S`), run **GLOW → Refresh regions from the Partners tab**, and check that the region's next SyncLog row says `applied`. |
 | **Form response could not be processed** | Detail names the response row and the error. Fix the cause (a Script Property, a missing answer), then run **Process any missed form responses** ("Missed form responses"). A Club Roster Form response more than 7 days old, or one refused because its Timestamp cell is not a date (a retry fails the same way): enter the change fresh instead and set its FormLog result to `resolved by hand by <name> <date>`. Close the item once FormLog has a row for that response (same form and `sheet_row`) whose result starts with neither `ERROR:` nor `HELD:` — the retry's success, or the one you set by hand; the earlier `ERROR:` row stays, and **Process any missed form responses** no longer offers it. A retry that was held (`HELD:`) continues as its **New club held as a possible duplicate** or **Club name already used by another partner — ask for a different name** item: close this one. |
 
@@ -5251,7 +5254,13 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
   support, community impact, success story, personal growth). Its "Formatted Report" export cuts
   every story at 255 characters (#201, tested 2026-11-04 through the Reports API's Excel export,
-  lengths only).
+  lengths only), and so does the Reports API's run (255 and "..."). **To export
+  the full stories:** open the report, the arrow beside Edit → Export → **Details Only**, Format
+  "Comma Delimited .csv", Export (the .xlsx format was not tested). Proved 2026-11-19 (#201, lengths only): the Details
+  Only .csv of 421 rows kept every story whole, its longest story per column equal to SOQL's
+  over the 2026 reports with its filters, U.S partners included (468 rows: 4,065, 4,039, 4,372
+  and 4,770 characters), where the Reports API run of the same 421 rows
+  stops at 257. A spreadsheet cell holds 32,767 characters, far above the longest story.
 - The approval overview (#200) is the new report "Approval Status by Month"
   (`00ORP000009p0qb2AA`, `Approval_Status_by_Month`, in "GLOW Monthly Reports") shown on D5 as a
   stacked column (`ColumnStacked`), "Monthly Report Approval Status: Approved vs Not Yet Approved
@@ -5620,7 +5629,7 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
 
 - **When:** corrected re-submissions the processor failed whole as `Duplicate` before 2026-10-24
   (it merges a correction since: ticket #108); their girls are missing from that club and day.
-- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)); the live run waits for Ryan's go.
+- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)). Run live 2026-10-26 (#153): 19 corrections re-sent (72 rows, 12 new girls). 12 batches from 2 clubs are held for GLOW (the plan's Result).
 - **Dry run:** `python3 tools/sf_backfill.py resend --vpn-off` (it reads Salesforce, so `--vpn-off` too).
 - **Apply:** `resend --apply --vpn-off --limit 1`, read back, then the rest, Ryan's go.
 - **Verify:** every copy is read back as it is sent; `sf_backfill.py status`.

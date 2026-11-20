@@ -581,7 +581,8 @@ def main():
     region_form = glow_forms.REGIONALS.get(region) or (forms[0][0] if forms else "<form id>")
     if moving:
         print("\nNext (docs/RUNBOOK.md, \"Moving a club to another partner\"):")
-        print("  In the sheet, now: GLOW -> Google Forms -> Update form dropdowns from the Roster")
+        print("  The Club Roster Form follows with the hourly refresh; for at once, in the sheet:")
+        print("    GLOW -> Google Forms -> Update form dropdowns from the Roster")
         print(f"    (until then the Club Roster Form lists the club under {partner!r}; a change "
               "sent that way is skipped and never retried -")
         print(f"    ReviewQueue 'Roster change for a club not on file' under {partner!r} = ask "
@@ -619,7 +620,8 @@ def main():
     print(f"  python3 tools/form_status.py --form {region_form} --roster data/roster_<date>.csv"
           "   # CLEAN")
     if not moving:
-        print("  In the sheet: GLOW -> Google Forms -> Update form dropdowns from the Roster")
+        print("  The Club Roster Form follows with the hourly refresh; for at once, in the sheet:")
+        print("    GLOW -> Google Forms -> Update form dropdowns from the Roster")
 
 
 if __name__ == "__main__":
