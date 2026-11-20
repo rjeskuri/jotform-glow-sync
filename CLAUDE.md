@@ -7,8 +7,7 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 `tools/auto_sync.py`. Procedures: `docs/RUNBOOK.md`. Design: `docs/ARCHITECTURE.md`.
 
 ## Commands
-- Once per clone: `make venv` (with the ruff `make check` needs) and `make hooks` (pre-commit
-  secret scan and ruff, the commit template).
+- Once per clone: `make venv` (and ruff for `make check`), `make hooks` (secret scan, ruff, template).
 - `make check` — everything, offline: the verify command (CI and the stop hook run it); healthy
   ends `CHECK PASSED`. Python tests: `make py` (unittest discover).
 - `python3 tools/auto_sync.py` — the automatic loop as a dry run (writes nothing); healthy: every
@@ -69,5 +68,6 @@ Roster changes reach Jotform automatically: sheet → `Dispatch.gs` → GitHub A
 11. Node 18 + clasp 2.4.2 are pinned. A new Google service in a `.gs` file adds an OAuth scope, and
     until the owner re-authorizes, the form-submit trigger FAILS HARD (`make gs` fails on a 9th
     service). Push, rollback and its floors: `.claude/skills/deploy-appsscript/SKILL.md`.
-12. Salesforce: VPN off before any `sf` call (Salesforce freezes the user); the tools take `--vpn-off`.
+12. Salesforce: VPN off before any `sf` call (it freezes the user): `scripts/vpn_check.sh` as its own
+    call. One live command per call, no `cd`, probe, `.env` or `X=` in front (salesforce skill).
     Writes: rule 1, subagents' too (merges ask); connector's: main session, Ryan's go; 1 record/call.

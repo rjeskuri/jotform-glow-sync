@@ -5753,6 +5753,25 @@ writes go through without a prompt"):
   method, path or flag, `deploy quick`, `--metadata-dir` or a request from a file
   is judged as above, and a destructive deploy asks. `sf apex run` gets no pass:
   a dry run cannot be told from its file.
+- Three wrappers are transparent (ticket #251): a leading `cd <a folder inside
+  the checkout> &&`, a leading `scripts/vpn_check.sh &&`, and a trailing `| jq
+  <filter>` or `| python3 -c '<snippet>'` that reads standard input only. What
+  they wrap gets the answer it gets alone - a pass, the automatic go, a prompt -
+  judged from the folder the cd names (clasp pushes that folder's project). The
+  cd's folder is inside the checkout whether `..` is taken logically or with
+  links followed: absolute, or relative from a folder inside it; never `~`, a
+  variable, `$( )`, an option or a path out of it. jq takes only `-r -c -e -j -S
+  -M -s -a` and one filter naming no `$`, `env`, `import` or `include`; the
+  snippet imports only `json`, `sys`, `csv`, `collections`, `re`, `math`,
+  `statistics`, `datetime` and `itertools`, and names nothing that opens a file,
+  runs a program or code, or reads the environment. Only a command made of plain
+  words and `&&` / `|` is unwrapped: `;`, `||`, an assignment or `.env` in front,
+  an inline VPN probe, a pipe into `python3 -`, a script, `sh` or `tee`, a
+  redirect are judged as above. The self-approvals, the forgeries and the delete
+  words still read the whole command (a wrapped query whose text holds `delete`
+  asks), and the log and the prompt show it whole. `scripts/vpn_check.sh` alone
+  is allowed by the settings, with no prompt; the Salesforce tools' `--vpn-off`
+  runs it too, and refuses while a tunnel is up.
 
 Live:
 
