@@ -54,6 +54,29 @@
 #   another body, method, path or flag, a curl, a quick deploy, --metadata-dir, a request
 #   from a file - is judged as before. sf apex run stays as above: a dry run (a savepoint
 #   rolled back) cannot be told from its file.
+# And since ticket #251 (Ryan, 2026-11-20: fewer prompts from how a command is written), three
+# wrappers are transparent: what they wrap gets the answer it gets alone - a #204 pass, the
+# automatic go, the prompt - judged from the folder the cd names:
+#   - a leading `cd <folder> &&`: the folder inside the checkout ($CLAUDE_PROJECT_DIR resolved,
+#     its .claude/worktrees/ too; not the main checkout of a worktree's session), the same whether
+#     .. is taken logically or with links followed - an absolute path, or one relative from an
+#     input cwd inside the checkout (and no CDPATH); never ~, a variable, $( ), an option (-, -P,
+#     +1) or a path that leaves the checkout;
+#   - a leading `scripts/vpn_check.sh &&`, run from inside the checkout (it exits 1 while a tunnel
+#     is up, so && runs nothing then);
+#   - a trailing `| jq` with only -r -c -e -j -S -M -s -a (or their long names) and one filter
+#     naming no $, env, import, include, modulemeta or get_search_list; or a trailing
+#     `| python3 -c '<snippet>'` and nothing after it: the snippet ASCII, importing only json,
+#     sys, csv, collections, re, math, statistics, datetime, itertools, naming nothing that
+#     reaches a file, a program, the network, the environment or code (open, exec, eval, compile,
+#     path, os, io, codecs, types, getattr, globals, modules, builtins, help, breakpoint, a name
+#     or key starting with _, ...), and its folder holding no module named as the standard
+#     library's (python3 -c imports from there).
+#   Only a command read whole as plain words (as #204 reads one) joined by && and | is unwrapped;
+#   anything else - ; or || for &&, an assignment or .env before it, an inline VPN probe, a pipe
+#   into python3 -, a script, sh or tee, a redirect - is judged as before. The self-approvals, the
+#   forgeries and the delete words still read the whole command, wrappers included (a wrapped
+#   query whose text says delete asks), and the log and the prompt show it whole.
 #
 # The automatic go needs ALL of:
 #   - one simple command: none of ; & | ` $( <( > # or a line break (a
@@ -148,6 +171,7 @@ case "$REST" in
   *) AGENT=$REST; CMD= ;;
 esac
 [ -z "$CMD" ] && exit 0
+WHOLE=$CMD      # the command as written: what the log and the prompt show (#251: CMD may become what a wrapper wraps)
 
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
 # Jotform or a python snippet with apply_changes=True is just as live a write.
@@ -190,13 +214,16 @@ PATTERN+="|${SELF})"
 # is --apply), and on both with the quote and backslash characters removed (gh 'workflow'
 # run, g""h, var\iable, --ap""ply).
 JOIN=$'\\\n' JOIN_CRLF=$'\\\r\n'
-JOINED=${CMD//"$JOIN_CRLF"/}
-JOINED=${JOINED//"$JOIN"/}
-FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
-JOINED=$(printf '%s' "$JOINED" | tr '\n\r' '  ')
 bare() { printf '%s' "$1" | tr -d '\\"'"'"; }
-BARE=$(bare "$JOINED")
-TEXTS=$FLAT$'\n'$(bare "$FLAT")$'\n'$JOINED$'\n'$BARE
+texts() {   # FLAT, JOINED, BARE and TEXTS: CMD's spellings (again for what a wrapper wraps, #251)
+  JOINED=${CMD//"$JOIN_CRLF"/}
+  JOINED=${JOINED//"$JOIN"/}
+  FLAT=$(printf '%s' "$CMD" | tr '\n\r' '  ')
+  JOINED=$(printf '%s' "$JOINED" | tr '\n\r' '  ')
+  BARE=$(bare "$JOINED")
+  TEXTS=$FLAT$'\n'$(bare "$FLAT")$'\n'$JOINED$'\n'$BARE
+}
+texts
 has() { printf '%s\n' "$TEXTS" | grep -Eiq -e "$1"; }
 first() { printf '%s\n' "$TEXTS" | grep -Eio -e "$1" | head -1; }
 MATCH=$(first "$PATTERN") || true
@@ -206,24 +233,28 @@ MATCH=$(first "$PATTERN") || true
 # -F query=@file). Live whatever the method - a read of them asks too. Every other gh api
 # call (issues, comments, labels, the harness's resume reads) is ungated, as before 2026-10-14,
 # and so is a message that mentions gh api without those words.
-GH_API=
-if has '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' && has '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
-  ON=$(first 'actions/|dispatches|graphql' | tr '[:upper:]' '[:lower:]')
-  [ -n "$ON" ] && GH_API="gh api on $ON"
-fi
-[ -z "$MATCH" ] && MATCH=$GH_API
 # sf api request: any GraphQL call (a mutation writes), and a REST call that writes - a method
 # other than GET (the CLI offers GET POST PUT PATCH HEAD DELETE OPTIONS TRACE), a body (-b,
 # --body), a request file (-f, --file: it carries its own method and body) or --flags-dir (a
 # file per flag: the method too). A relative path (/services/data/...) does not name the host,
 # so the URL pattern above does not see it.
-SF_API=
-if has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
-  SF_API="sf api request graphql"
-elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
-    && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file|--flags-dir)'; then
-  SF_API="sf api request rest that writes"
-fi
+apis() {   # GH_API and SF_API from TEXTS (again for what a wrapper wraps, #251)
+  local on
+  GH_API=
+  if has '(^|[^[:alnum:]_.-])gh([^[:alnum:]_.-]|$)' && has '(^|[^[:alnum:]_])api([^[:alnum:]_]|$)'; then
+    on=$(first 'actions/|dispatches|graphql' | tr '[:upper:]' '[:lower:]')
+    [ -n "$on" ] && GH_API="gh api on $on"
+  fi
+  SF_API=
+  if has "${SF}api[[:space:]]+request[[:space:]]+graphql"; then
+    SF_API="sf api request graphql"
+  elif has "${SF}api[[:space:]]+request[[:space:]]+rest" \
+      && has '(^|[[:space:]])((-X|--method)[[:space:]=]*["'\'']?(POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)|-[bf]|--body|--file|--flags-dir)'; then
+    SF_API="sf api request rest that writes"
+  fi
+}
+apis
+[ -z "$MATCH" ] && MATCH=$GH_API
 [ -z "$MATCH" ] && MATCH=$SF_API
 # curl with a config file (Ryan, 2026-11-06): it sets the method, the URL and the data, so every
 # curl -K is live, whatever host it names or none - a -K (alone, joined to its file, or last in
@@ -309,7 +340,7 @@ PLAIN_PIECE='^([A-Za-z0-9_./:@,+=%-]+|\{\}|'"'[^']*'"'|"[^"$`\\!]*")'
 BLANK=$' \t'
 SW=()
 plain_words() {
-  local rest=$CMD word piece started
+  local rest=$INNER word piece started
   case "$rest" in *$'\n'* | *$'\r'*) return 1 ;; esac
   while :; do
     rest=${rest#"${rest%%[!$BLANK]*}"}
@@ -427,8 +458,202 @@ pass_query() {
   [ "$queries" -eq 1 ] || return 1
   PASS="a SOQL query"
 }
-PASS=
+
+# ---- #251: the wrappers the gate sees through (the header lists them). INNER is what they wrap -
+# the command itself when there is none -, and the passes above and the write rules below judge it,
+# from the folder its cd names; the self-approvals, the forgeries and the delete words keep reading
+# the whole command (TEXTS), and the log and the prompt show it whole (WHOLE).
+PROJECT=${CLAUDE_PROJECT_DIR:-}
+# the checkout and the Bash tool's working folder (the input's cwd, where a relative path in
+# the command starts and clasp looks for its project), each resolved - links and .. followed;
+# empty when missing, relative, not a folder, or unreadable input
+input_cwd() {
+  local c
+  if command -v jq >/dev/null 2>&1; then
+    c=$(printf '%s' "$INPUT" | jq -j '.cwd | if type == "string" then . else "" end' 2>/dev/null; printf x)
+  else
+    c=$(printf '%s' "$INPUT" | python3 -c '
+import json, sys
+c = json.load(sys.stdin).get("cwd")
+print(c if isinstance(c, str) else "", end="")' 2>/dev/null; printf x)
+  fi
+  printf '%s' "${c%x}"
+}
+resolved() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
+LOCATED=
+locate() {   # PROJECT_REAL, CWD_IN and WD, read once
+  [ -n "$LOCATED" ] && return 0
+  LOCATED=1 PROJECT_REAL= WD=
+  [ -n "$PROJECT" ] && case "$PROJECT" in /*) PROJECT_REAL=$(resolved "$PROJECT") ;; esac
+  CWD_IN=$(input_cwd)
+  case "$CWD_IN" in
+    *$'\n'* | *$'\r'*) ;;
+    /*) WD=$(resolved "$CWD_IN") ;;
+  esac
+  return 0
+}
+inside() {   # a resolved folder: the checkout or a folder under it
+  [ -n "$PROJECT_REAL" ] && [ -n "$1" ] || return 1
+  case "$1/" in "$PROJECT_REAL"/*) return 0 ;; esac
+  return 1
+}
+lexical() {   # an absolute path with . and .. taken away as the shell's (logical) cd takes them
+  local part out= IFS=/
+  set -f
+  for part in $1; do
+    case "$part" in '' | .) ;; ..) out=${out%/*} ;; *) out=$out/$part ;; esac
+  done
+  set +f
+  printf '%s' "${out:-/}"
+}
+# the command as plain words (PLAIN_PIECE, as plain_words reads them) and the operators && and |:
+# each token's kind (w or o), its value as the shell reads it, where it starts and ends in CMD
+TK=() TV=() TA=() TZ=()
+tokens() {
+  local rest=$CMD len=${#CMD} word piece started at
+  case "$rest" in *$'\n'* | *$'\r'*) return 1 ;; esac
+  while :; do
+    rest=${rest#"${rest%%[!$BLANK]*}"}
+    [ -z "$rest" ] && break
+    at=$((len - ${#rest}))
+    case "$rest" in
+      '||'* | '|&'*) return 1 ;;
+      '&&'*) piece='&&' ;;
+      '|'*) piece='|' ;;
+      *) piece= ;;
+    esac
+    if [ -n "$piece" ]; then
+      rest=${rest:${#piece}}
+      TK[${#TK[@]}]=o; TV[${#TV[@]}]=$piece; TA[${#TA[@]}]=$at; TZ[${#TZ[@]}]=$((at + ${#piece}))
+      continue
+    fi
+    word= started=
+    while [[ $rest =~ $PLAIN_PIECE ]]; do
+      piece=${BASH_REMATCH[1]}
+      rest=${rest:${#piece}}
+      case "$piece" in \'*\' | \"*\") piece=${piece:1:$((${#piece} - 2))} ;; esac
+      word=$word$piece
+      started=1
+    done
+    [ -n "$started" ] || return 1
+    case "$rest" in '' | ["$BLANK"]* | '|'* | '&&'*) ;; *) return 1 ;; esac
+    TK[${#TK[@]}]=w; TV[${#TV[@]}]=$word; TA[${#TA[@]}]=$at; TZ[${#TZ[@]}]=$((len - ${#rest}))
+  done
+  [ ${#TK[@]} -gt 0 ]
+}
+# where the wrapped command runs: L as the shell's logical cd has it, P resolved; HERE once set
+HERE= L= P=
+here() {
+  [ -n "$HERE" ] && return 0
+  locate
+  HERE=1 L=$CWD_IN P=$WD
+}
+# cd <dest>: a folder inside the checkout, the same folder whether .. is taken logically (the
+# shell's cd) or with links followed (cd -P); relative only from a folder inside the checkout
+cd_into() {
+  local d=$1 l p
+  here
+  case "$d" in
+    /*) l=$(lexical "$d"); p=$(resolved "$d") ;;
+    [A-Za-z0-9_.]*)
+      [ -z "${CDPATH:-}" ] && inside "$P" || return 1
+      case "$L" in /*) ;; *) return 1 ;; esac
+      l=$(lexical "$L/$d"); p=$(resolved "$P/$d") ;;
+    *) return 1 ;;      # -, -P, +1, ~, =cmd, an empty path: no folder the gate can name
+  esac
+  inside "$p" && [ "$(resolved "$l")" = "$p" ] || return 1
+  L=$l P=$p
+}
+# jq on standard input: the options below and ONE filter that reads no file, module or environment
+JQ_DENY='(^|[^A-Za-z0-9_])(env|import|include|modulemeta|get_search_list)([^A-Za-z0-9_]|$)'
+jq_tail() {   # FROM TO: jq's arguments, TV[FROM..TO-1]
+  local i=$1 w filters=0
+  while [ "$i" -lt "$2" ]; do
+    w=${TV[$i]}; i=$((i + 1))
+    case "$w" in
+      --raw-output | --compact-output | --exit-status | --join-output | --sort-keys | --monochrome-output \
+        | --slurp | --ascii-output) ;;
+      -*) [[ $w =~ ^-[rcejSMsa]+$ ]] || return 1 ;;
+      *) case "$w" in *'$'*) return 1 ;; esac
+         [[ $w =~ $JQ_DENY ]] && return 1
+         filters=$((filters + 1)) ;;
+    esac
+  done
+  [ "$filters" -eq 1 ]
+}
+# a python3 -c snippet that reads standard input only: checked by python3 itself, isolated (-I -S),
+# against the folder it runs in; a python3 without sys.stdlib_module_names (before 3.10) says no
+PY_SNIPPET_CHECK='
+import ast, os, re, sys
+snippet, folder = sys.argv[1], sys.argv[2]
+ALLOWED = {"json", "sys", "csv", "collections", "re", "math", "statistics", "datetime", "itertools"}
+DENY = re.compile(r"(?<![A-Za-z0-9_])_|exec|eval|compile|open|breakpoint|importlib|path|\b(help|getattr|setattr"
+                  r"|delattr|globals|vars|locals|builtins|modules|subprocess|shutil|os|socket|urllib|io|codecs"
+                  r"|types|environ|getenv|tool|ctypes|pickle|marshal|(f|gi|cr|ag|tb|co)_\w*)\b")
+if not re.fullmatch(r"[ -~]+", snippet) or DENY.search(snippet):
+    sys.exit(1)
+for node in ast.walk(ast.parse(snippet)):
+    if isinstance(node, ast.Import) and any(a.name not in ALLOWED for a in node.names):
+        sys.exit(1)
+    if isinstance(node, ast.ImportFrom) and (node.level or node.module not in ALLOWED):
+        sys.exit(1)
+stdlib = sys.stdlib_module_names
+for entry in os.listdir(folder):
+    full = os.path.join(folder, entry)
+    if entry.split(".")[0] in stdlib and (entry.endswith((".py", ".pyc", ".so")) or os.path.isdir(full)
+                                          and any(n.startswith("__init__.") for n in os.listdir(full))):
+        sys.exit(1)
+'
+snippet_ok() {
+  here
+  [ -n "$P" ] && command -v python3 >/dev/null 2>&1 || return 1
+  python3 -I -S -c "$PY_SNIPPET_CHECK" "$1" "$P" >/dev/null 2>&1 </dev/null
+}
+tail_ok() {   # K N: TV[K] is the last |, TV[K+1..N-1] a read-only jq or python3 -c on standard input
+  local a=$(($1 + 1))
+  case "${TV[$a]:-}" in
+    jq) jq_tail $((a + 1)) "$2" ;;
+    python3) [ $(($2 - a)) -eq 3 ] && [ "${TV[$((a + 1))]}" = -c ] && snippet_ok "${TV[$((a + 2))]}" ;;
+    *) return 1 ;;
+  esac
+}
+WRAPPED= INNER=$CMD CD_INTO=
+unwrap() {
+  local n i=0 k to cd=
+  tokens || return 1
+  n=${#TK[@]}
+  # leading: cd <folder> && | scripts/vpn_check.sh &&, each with a command after it
+  while [ $((i + 2)) -lt "$n" ] && [ "${TK[$i]}" = w ]; do
+    if [ "${TV[$i]}" = cd ] && [ "${TK[$((i + 1))]}" = w ] && [ "${TK[$((i + 2))]}" = o ] \
+        && [ "${TV[$((i + 2))]}" = '&&' ] && [ $((i + 3)) -lt "$n" ] && cd_into "${TV[$((i + 1))]}"; then
+      cd=1 i=$((i + 3))
+    elif [ "${TV[$i]}" = scripts/vpn_check.sh ] && [ "${TK[$((i + 1))]}" = o ] && [ "${TV[$((i + 1))]}" = '&&' ] \
+        && here && inside "$P"; then
+      i=$((i + 2))
+    else
+      break
+    fi
+  done
+  [ "${TK[$i]}" = w ] || return 1
+  # trailing: the last operator a | and what follows it a read-only filter of standard input
+  k=$((n - 1)) to=$n
+  while [ "$k" -gt "$i" ] && [ "${TK[$k]}" = w ]; do k=$((k - 1)); done
+  [ "$k" -gt "$i" ] && [ "${TV[$k]}" = '|' ] && tail_ok "$k" "$n" && to=$k
+  [ "$i" -gt 0 ] || [ "$to" -lt "$n" ] || return 1
+  INNER=${CMD:${TA[$i]}:$((${TZ[$((to - 1))]} - ${TA[$i]}))}
+  WRAPPED=1
+  [ -n "$cd" ] && CD_INTO=$P
+  return 0
+}
+# (only where a wrapper can change the answer: something live in the text, or an sf command a
+# pass could take - an ordinary pipe ends below, no decision, without reading the cwd)
 case "$CMD" in
+  cd["$BLANK"]* | scripts/vpn_check.sh["$BLANK"]* | *'|'*)
+    { [ -n "$MATCH" ] || [[ $CMD =~ $SF ]]; } && unwrap ;;
+esac
+
+PASS=
+case "$INNER" in
   sf["$BLANK"]* | sfdx["$BLANK"]*)
     if ! has '--apply|--rehearse|--prune' && plain_words; then
       case "${SW[1]:-} ${SW[2]:-} ${SW[3]:-}" in
@@ -462,11 +687,10 @@ read_only() {
 read_only && exit 0
 
 # A live command: one decision, logged with the mode and the caller.
-PROJECT=${CLAUDE_PROJECT_DIR:-}
 LOG="${PROJECT:-.}/.claude/live_gate.log"
 CALLER=
 [ "$AGENT" = "true" ] && CALLER=" agent"
-log() { printf '%s %s mode=%s%s %s\n' "$(date '+%F %T')" "$1" "$MODE" "$CALLER" "$CMD" >> "$LOG"; }
+log() { printf '%s %s mode=%s%s %s\n' "$(date '+%F %T')" "$1" "$MODE" "$CALLER" "$WHOLE" >> "$LOG"; }
 SHOWN=${FLAT:0:300}
 [ ${#FLAT} -gt 300 ] && SHOWN="$SHOWN ..."
 RUNBOOK='See docs/RUNBOOK.md, "Live gate (Claude Code)".'
@@ -547,8 +771,9 @@ $RUNBOOK") || out=
   printf '%s\n' "$out"
   exit 0
 }
-# a query or a dashboard read with nothing live in its text: allowed, or no decision as before
-if [ -z "$MATCH" ]; then
+# a query or a dashboard read with nothing live in its text: allowed, or no decision as before -
+# once wrapped (#251), only after the delete words below have read the whole command
+if [ -z "$MATCH" ] && [ -z "$WRAPPED" ]; then
   pass_through
   exit 0
 fi
@@ -596,30 +821,11 @@ set -f
 WORDS=($BARE)
 set +f
 words() { [ ${#WORDS[@]} -gt 0 ] && printf '%s\n' "${WORDS[@]}"; }
-# the checkout and the Bash tool's working folder (the input's cwd, where a relative path in
-# the command starts and clasp looks for its project), each resolved - links and .. followed;
-# empty when missing, relative, not a folder, or unreadable input
-input_cwd() {
-  local c
-  if command -v jq >/dev/null 2>&1; then
-    c=$(printf '%s' "$INPUT" | jq -j '.cwd | if type == "string" then . else "" end' 2>/dev/null; printf x)
-  else
-    c=$(printf '%s' "$INPUT" | python3 -c '
-import json, sys
-c = json.load(sys.stdin).get("cwd")
-print(c if isinstance(c, str) else "", end="")' 2>/dev/null; printf x)
-  fi
-  printf '%s' "${c%x}"
-}
-resolved() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
-PROJECT_REAL=
-[ -n "$PROJECT" ] && case "$PROJECT" in /*) PROJECT_REAL=$(resolved "$PROJECT") ;; esac
-CWD_IN=$(input_cwd)
-WD=
-case "$CWD_IN" in
-  *$'\n'* | *$'\r'*) ;;
-  /*) WD=$(resolved "$CWD_IN") ;;
-esac
+# the checkout and the working folder (locate, above); what a wrapper's cd wraps runs in the
+# folder the cd names (#251), and its relative paths and clasp's project are that folder's
+locate
+RUNS_IN=$CWD_IN
+[ -n "$CD_INTO" ] && WD=$CD_INTO RUNS_IN=$CD_INTO
 
 # ... and the deletes that only a file shows (F1 of PR #154's review): anonymous Apex whose
 # file holds delete, merge (a merge deletes the losing record), undelete or emptyRecycleBin -
@@ -713,6 +919,18 @@ fi
 
 # #204: a dashboard refresh or a check-only deploy, once no self-approval and no delete is in it
 [ -n "$PASS" ] && pass_through
+# #251: a wrapped command with nothing live in its text and no pass: no decision, as alone
+[ -z "$MATCH" ] && exit 0
+
+# #251: from here on what a wrapper wraps is judged as it is alone (from the folder its cd names)
+if [ -n "$WRAPPED" ]; then
+  CMD=$INNER
+  texts
+  apis
+  set -f
+  WORDS=($BARE)
+  set +f
+fi
 
 # ---- a WRITE: automatic when it is one simple command, recognised, and backed up today
 TODAY=$(date +%F)
@@ -1085,7 +1303,7 @@ if [ -z "$WHY" ]; then
             add_used "appsscript/ at HEAD $sha"; add_target appsscript "$sha"
           else
             case "$ident" in .) WHERE="the checkout" ;; *) WHERE="$ident/" ;; esac
-            nope "Not automatic: clasp pushes the project of the folder it runs in, and this push runs in ${CWD_IN:-a folder the input does not name}, not $WHERE (npx clasp push in appsscript/, npm run clasp:push in the checkout)."
+            nope "Not automatic: clasp pushes the project of the folder it runs in, and this push runs in ${RUNS_IN:-a folder the input does not name}, not $WHERE (npx clasp push in appsscript/, npm run clasp:push in the checkout)."
           fi
         else
           HINTS="$HINTS
@@ -1141,10 +1359,10 @@ if [ -z "$OUT" ]; then
   printf '%s\n' "BLOCKED by .claude/hooks/live_gate.sh - the allow decision could not be built for: $SHOWN" >&2
   exit 2
 fi
-printf '%s ALLOWED mode=%s%s target=%s backup=%s %s\n' "$(date '+%F %T')" "$MODE" "$CALLER" "$TARGET" "$USED" "$CMD" >> "$LOG"
+printf '%s ALLOWED mode=%s%s target=%s backup=%s %s\n' "$(date '+%F %T')" "$MODE" "$CALLER" "$TARGET" "$USED" "$WHOLE" >> "$LOG"
 if command -v osascript >/dev/null 2>&1; then
   (osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' \
-    "GLOW live write auto-approved" "$IDS: ${CMD:0:120}" </dev/null >/dev/null 2>&1 &)
+    "GLOW live write auto-approved" "$IDS: ${WHOLE:0:120}" </dev/null >/dev/null 2>&1 &)
 fi
 printf '%s\n' "$OUT"
 exit 0
