@@ -27,12 +27,19 @@ and the existing folders are re-filed once, after that work.
 `Attendance_Date__c`. The photo mover only moves folders and never renames them. Folders made
 before 2026-10-30 carry the club name only, no date.
 
-Evidence: the integration setting as the repo records it (RUNBOOK "Photos", step 2, and the
-template's setup) and the mover's code. **No live read happened**: a session could not load the
-API key to read the integration block (ticket #225, comment of 2026-11-19). The by-eye check of
-one settled folder is still Ryan's: on the Shared Drive, one folder named `<club> <date>` whose
-date differs from its Drive "Created" date (the upload) - the name's date should match the
-session date of that submission in Jotform, not "Created". Its answer goes in the Result.
+Evidence:
+
+- The repo's record: the integration setting (RUNBOOK "Photos", step 2: `{Club Name} {Date}`,
+  `{Date}` question 17) and the mover's code, which never renames.
+- Ryan's by-eye check, 2026-11-23 (ticket #225 comment): two settled photo folders on the Shared
+  Drive. In each, the date in the folder's name was a couple of days before the folder's Drive
+  "Modified" date. That fits a name carrying the session date, with the photos uploaded
+  afterwards; a name carrying the upload date would match.
+- Caveat: "Modified" was read, not "Created", and the mover's move also updates "Modified", so it
+  is an upper bound on the upload, not the upload itself.
+- The Jotform API does not expose the Google Drive integration block:
+  `tools/integration_status.py` shows `other integrations: none` on every form (2026-11-23). So
+  the by-eye read is the live evidence.
 
 Text Ryan can send: "The date in each photo folder's name is the session date the mentor
 entered on the form, not the date the photo was uploaded. Folders from before 30 October 2026
@@ -166,5 +173,8 @@ would run `previewMoves` (or its own dry run) before any real move, like every s
 
 ## Result
 
-<!-- To fill: the by-eye date check (one settled folder: name date vs Drive "Created"), each live
-     step with its date (UTC) and counts, `Live:` -->
+- **The date check: done**, 2026-11-23, Ryan, by eye: two settled folders, the name's date a
+  couple of days before Drive "Modified" (an upper bound on the upload). Answer for staff: the
+  dates are session dates ("The staff answer on dates", above).
+
+<!-- To fill: each live step with its date (UTC) and counts, `Live:` -->

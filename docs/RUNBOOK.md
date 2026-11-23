@@ -1243,8 +1243,8 @@ is deleted from Drive until the photo mover's retention is live. Jotform keeps i
 (Auto Delete Submissions stays off, BACKLOG 68).
 
 **The date in a folder's name is the session date** (question 17, the date the mentor picks),
-not the upload date (#225, 2026-11-19). **Planned (#225, not live yet):** the subfolder naming
-becomes `{Partner} | {Club Name} | {Date} | {Week}` (e.g. `Sunrise Partners | Sunrise Club |
+not the upload date (#225; checked by eye on two folders, 2026-11-23).
+**Planned (#225, not live yet):** the subfolder naming becomes `{Partner} | {Club Name} | {Date} | {Week}` (e.g. `Sunrise Partners | Sunrise Club |
 10-30-2026 | 4`; `{Week}` is question 100, blank for a special event), and the photo mover files
 such a folder under `<Region>/<Partner>/<YYYY-MM>/` ("Photo mover", below). It waits for question
 331 (Partner) to be filled on the forms with the Club picker (a calculation the sync generates,
