@@ -125,6 +125,7 @@ club alone), so re-filing them needs a lookup of club → partner (the Roster or
 a new data source or scope for the standalone mover: a design decision for Ryan. Ryan's comment
 of 2026-11-18 also puts the re-filing after this work. It is a separate follow-up ticket; it
 would run `previewMoves` (or its own dry run) before any real move, like every step here.
+Ticket #237 does it: [plan](2026-11-23-refile-photo-folders.md).
 
 ## Rollout (live; every step on Ryan's go)
 
