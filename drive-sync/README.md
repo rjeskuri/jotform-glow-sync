@@ -36,7 +36,19 @@ What it does and never does:
   in one (in the trash through its folder only) moves like any other, out of the trash in the
   same update; a photo a person trashed is left alone. So: to discard a photo in My Drive, trash
   the photo itself, not only its subfolder;
-- two or more folders of that name on the Shared Drive: refused and logged, moved by hand;
+- where (#225, [plan](../docs/plans/2026-11-19-photo-folders-partner-month.md)): a subfolder
+  named `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (the week blank or left out for a
+  special event; each form's Drive integration names it) goes in `<Partner>/<YYYY-MM>/` under
+  the region folder, the month from its session date (`Plan.gs` `photoPath_`); any other name
+  (`<Club Name> <MM-DD-YYYY>`, the club alone, a blank partner, a date that is not a real date)
+  directly in the region folder, as before. The partner and month folders are found by name
+  (one in the trash does not count) and reused, or made by the real run when missing
+  (`Drive.Files.create`, `supportsAllDrives`); two of one name at a level: that subfolder is
+  refused and logged, nothing of it moves. The dry run makes nothing and logs the target path
+  (`would move "<name>" to <Region>/<Partner>/<YYYY-MM>`). A same-name folder counts only at the
+  subfolder's own path (a merge, a refusal). Nothing is ever renamed;
+- two or more folders of that name at its path on the Shared Drive: refused and logged, moved by
+  hand;
 - the `Attendance photos - <Region>` folders themselves stay: Jotform writes into them;
 - retention (#185, only with `RETENTION_DAYS` set, only on the real run, after the moves): every
   photo under a region folder on the Shared Drive, at any depth (directly in the region folder,
@@ -59,8 +71,8 @@ What it does and never does:
   anything for good (no permanent delete, no emptied trash). The photos show girls' faces; only
   the Shared Drive's members see them;
 - the log (Executions) holds counts and folder names, never a file's name or contents; for
-  retention only the names of the region folders' direct subfolders (the club subfolders), with
-  everything deeper counted under them:
+  retention only the names of the region folders' direct subfolders (the club subfolders filed
+  there, and the partner folders of #225), with everything deeper counted under them:
 
   | Line | Means |
   | --- | --- |
@@ -74,7 +86,8 @@ What it does and never does:
   | `TRASH_REFUSED <Region>: …` | the plan named a region folder, the root, or something not below its region folder: nothing trashed that run, an error (a bug: stop and look) |
   | `RETENTION_FAILED <step>: <error>` | a retention read failed: nothing previewed or trashed, an error after the moves |
 
-Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js`), `Mover.gs` (the entry
+Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js` and, for the partner and
+month layout, `test/drive_sync_layout_test.js`), `Mover.gs` (the entry
 points), `appsscript.json` (time zone America/New_York, the sheet's; the two scopes; the advanced
 Drive service `Drive`, v3), `.clasp.json.example` (the clasp link template), `.claspignore`.
 
