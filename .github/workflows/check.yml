@@ -1,13 +1,18 @@
-# The offline feedback loop, on every push and pull request. Needs no
+# The offline feedback loop, on every pull request (and by hand). Needs no
 # secrets: the tests run on the synthetic fixture (test/fixtures/).
+# Not on the push to main: a landed PR's tree is the one its PR run verified
+# (harness-pr land --catch-up). Runs on GitHub's runners while the repository
+# is public (free); back to the Mac's self-hosted runner when private (#256).
 name: check
-on: [push, pull_request]
+on:
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
