@@ -57,8 +57,9 @@ it never adds the fill, and on a form that has it, it keeps it.
    --roster data/roster_<date>.csv --partners data/partners_<date>.csv`: rules CLEAN, and a second
    dry run without the flag says `(conditions unchanged - skipping the rewrite)`.
 4. One test submission on the template, arranged to change nothing in Salesforce (the recipe in
-   RUNBOOK "Photos", step 3): pick a club, then switch to another partner's club before
-   submitting. Check that the submission's q331 holds the second club's partner (proves the
+   RUNBOOK "Photos", step 3): pick a club, then, before submitting, switch to a club of a partner
+   in the middle of the fill's order - not the alphabetically first, whose rule runs last in
+   Jotform's walk (index 0 runs last) and would pass by luck. Check that the submission's q331 holds the second club's partner (proves the
    false-turned condition does not blank q331, and that the literal text is written as is), that
    q5 is the second club's entry as before the fill, and that the staff e-mail's "Partner" row
    shows the partner. Then delete the test submission.
@@ -70,10 +71,20 @@ it never adds the fill, and on a form that has it, it keeps it.
 
 ## Rollback
 
-Per form, `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json --apply` from
-step 1's backup puts the rules back without the fill; the next run sees no calculation into q331
-and writes none. If the restore refuses (a club added to the picker since), delete the fill rules
-(calculations into q331) in the builder, Settings > Conditions: the next run writes none either.
+Per form, in one sitting:
+
+1. `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json` from step 1's
+   backup, dry run then `--apply`: the rules as they were before the fill. It refuses a snapshot
+   that tests a club the picker no longer offers (renamed or retired since step 1); then add
+   `--force` - step 2 rebuilds those rules.
+2. At once, the sync by hand without `--partner-fill` (step 2's command on today's exports, dry
+   run then `--apply`): with no calculation into q331 left the fill stays off, and every picker
+   entry gets its rules back. Not optional: a club added since step 1 passes the restore without
+   its show rule, its question 18 operand and its club-guard term, and the runner reads that
+   rules-only difference as `in-sync` - its roster would never show and, on a guarded form, its
+   mentors could not submit.
+3. `python3 tools/form_status.py` (step 3's command): rules CLEAN.
+
 A revert of the code alone does not remove the fill from a form that has it until that form's next
 rewrite: roll the forms back first.
 

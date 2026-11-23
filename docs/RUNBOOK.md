@@ -1900,7 +1900,10 @@ staff e-mail. It is turned on by hand, once per form, with `--partner-fill` on t
 dry run, apply, `form_status.py`); from then on the form's own rules keep it on and the runner
 keeps it (it never passes the flag). Refused on a form without the Club picker, and while a rule
 still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` from the backup
-taken before it; the next run sees no calculation into q331 and writes none.
+taken before it (`--force` if it refuses a club renamed or retired since), then at once the sync
+by hand without the flag (dry run, `--apply`) and `form_status.py`: with no calculation into q331
+the fill stays off, and a club added since the backup gets back the rules the restore took from
+it, which the runner, reading a rules-only difference as `in-sync`, would never write.
 
 ### The one-time switch (`--same-name-switch`)
 
