@@ -34,6 +34,26 @@
 #     writes a Salesforce plan's before/ (touch under it, cp|mv|rsync|ditto|ln|install
 #     onto it, > or tee into it - unless a query, export or retrieve alone saves its
 #     output there). A read of the records whose output goes elsewhere is no forgery.
+# And since ticket #204 (Ryan, 2026-11-04: no prompt unless it is destructive), "allow"
+# with no prompt and no backup - in the modes a backed write is allowed in, from a subagent
+# too; plan and an unknown mode as before - for what changes no record and no metadata,
+# logged PASSED (no notification):
+#   - a dashboard refresh: sf|sfdx api request rest /services/data/vNN.N/analytics/
+#     dashboards/<01Z id> with PUT (-X, --method) and no body or an empty {} one; a GET of
+#     the dashboard or of its /status;
+#   - a check-only deploy: sf|sfdx project deploy start --dry-run, or project deploy
+#     validate, with -d/--source-dir, -x/--manifest or -m/--metadata, and only -o, -l, -t,
+#     -w, --api-version, --json, --concise, --verbose beside them;
+#   - a SOQL query: sf|sfdx data query with -q/--query or -f/--file, and only -o, -r, -t,
+#     -w, -b, --all-rows, --async, --api-version, --json and --output-file inside data/.
+#   Each only as one plain command read as the shell reads it: unquoted letters, digits and
+#   _ . / : @ , + = % - (or an empty {}), whole quoted strings ('...', or "..." with no $ `
+#   \ or !), nothing the shell would expand, redirect, chain or run, every flag known, and
+#   no --apply, --rehearse or --prune anywhere. The self-approvals, the deletes and a deploy
+#   of a folder with a destructiveChanges*.xml are judged first, as above. Anything else -
+#   another body, method, path or flag, a curl, a quick deploy, --metadata-dir, a request
+#   from a file - is judged as before. sf apex run stays as above: a dry run (a savepoint
+#   rolled back) cannot be told from its file.
 #
 # The automatic go needs ALL of:
 #   - one simple command: none of ; & | ` $( <( > # or a line break (a
@@ -131,9 +151,10 @@ esac
 
 # Tool flags AND the raw API shapes the tools wrap - a direct curl PUT to
 # Jotform or a python snippet with apply_changes=True is just as live a write.
-# Salesforce, through sf or the older sfdx: a deploy (a check-only one too) or a
-# delete of metadata, data writes, anonymous Apex, the REST API itself, and
-# --rehearse (sf_dupes.py's production DML, rolled back).
+# Salesforce, through sf or the older sfdx: a deploy (a check-only one too: #204's
+# pass below lets the plain ones through) or a delete of metadata, data writes,
+# anonymous Apex, the REST API itself, and --rehearse (sf_dupes.py's production DML,
+# rolled back).
 SF='(^|[^[:alnum:]_.-])sf(dx)?[[:space:]]+'
 PATTERN="(--apply|--prune|--rehearse|clasp[[:space:]]+push|clasp:push|sheets_client\.py[[:space:]]+import|api\.jotform\.com|api\.github\.com/[^[:space:]]*(actions/|dispatches|graphql)|apply_changes[[:space:]]*=[[:space:]]*True|values\(\)\.(update|append|clear)|batchUpdate"
 PATTERN+="|${SF}project[[:space:]]+deploy[[:space:]]+(start|quick|validate)|${SF}deploy[[:space:]]+metadata|${SF}project[[:space:]]+delete[[:space:]]+source"
@@ -276,7 +297,148 @@ else
   fi
 fi
 [ -z "$MATCH" ] && MATCH=$FORGED
-[ -z "$MATCH" ] && exit 0
+
+# ---- #204: what changes no record and no metadata passes with no prompt and no backup - a
+# dashboard refresh and its read, a check-only deploy, a SOQL query (the header lists each
+# shape). The command is read as the shell reads it only where that reading is plain: SW gets
+# its words when every one is made of unquoted letters, digits and _ . / : @ , + = % - (an
+# empty {} too: no brace expansion), and whole quoted strings - '...', or "..." with no $ `
+# \ or ! -, split by spaces and tabs (the shell's blanks); anything else (a line break, ; & |
+# < > ( ) # ~ * ? [ ], a $, a backslash, a quote left open) is no plain command, and no pass
+PLAIN_PIECE='^([A-Za-z0-9_./:@,+=%-]+|\{\}|'"'[^']*'"'|"[^"$`\\!]*")'
+BLANK=$' \t'
+SW=()
+plain_words() {
+  local rest=$CMD word piece started
+  case "$rest" in *$'\n'* | *$'\r'*) return 1 ;; esac
+  while :; do
+    rest=${rest#"${rest%%[!$BLANK]*}"}
+    [ -z "$rest" ] && break
+    word= started=
+    while [[ $rest =~ $PLAIN_PIECE ]]; do
+      piece=${BASH_REMATCH[1]}
+      rest=${rest:${#piece}}
+      case "$piece" in \'*\' | \"*\") piece=${piece:1:$((${#piece} - 2))} ;; esac
+      word=$word$piece
+      started=1
+    done
+    [ -n "$started" ] || return 1
+    case "$rest" in '' | ["$BLANK"]*) ;; *) return 1 ;; esac
+    SW[${#SW[@]}]=$word
+  done
+  [ ${#SW[@]} -gt 0 ]
+}
+ALIAS_RE='^[A-Za-z0-9_][A-Za-z0-9_.@+-]*$'                 # -o/--target-org: an alias or a username
+VERSION_RE='^[0-9]+\.[0-9]+$'
+PATH_RE='^[A-Za-z0-9_./][A-Za-z0-9_./@+-]*$'              # a source folder, a manifest, a SOQL file
+METADATA_RE='^[A-Za-z][A-Za-z0-9_]*(:[A-Za-z0-9_.*/-]+)?$'  # Type or Type:Name (Report:Folder/Name)
+TEST_RE='^[A-Za-z0-9_.]+$'
+DASHBOARD_RE='^/services/data/v[0-9]+\.[0-9]+/analytics/dashboards/01Z[A-Za-z0-9]{12}([A-Za-z0-9]{3})?(/status)?$'
+# a query's --output-file: a file inside data/ (from the checkout), never climbing out
+output_in_data() {
+  local p=${1#./}
+  case "$p" in data/?*) ;; *) return 1 ;; esac
+  case "/$p/" in */../* | */./*) return 1 ;; esac
+  [[ $p =~ $PATH_RE ]]
+}
+# sf|sfdx api request rest: a dashboard refresh (PUT, no body or {}) or a GET of it or its /status
+pass_rest() {
+  local i=4 n=${#SW[@]} w name val url= method= body= bodies=0 orgs=0
+  while [ "$i" -lt "$n" ]; do
+    w=${SW[$i]}; i=$((i + 1))
+    case "$w" in
+      -i | --include) continue ;;
+      --*=*) name=${w%%=*}; val=${w#*=} ;;
+      -X?*) name=-X; val=${w#-X} ;;
+      -*) name=$w; [ "$i" -lt "$n" ] || return 1; val=${SW[$i]}; i=$((i + 1)) ;;
+      *) [ -z "$url" ] || return 1; url=$w; continue ;;
+    esac
+    case "$name" in
+      -X | --method) [ -z "$method" ] || return 1; method=$val ;;
+      -b | --body) bodies=$((bodies + 1)); body=$val ;;
+      -o | --target-org) orgs=$((orgs + 1)); [[ $val =~ $ALIAS_RE ]] || return 1 ;;
+      --api-version) [[ $val =~ $VERSION_RE ]] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+  [[ $url =~ $DASHBOARD_RE ]] || return 1
+  [ "$bodies" -le 1 ] && [ "$orgs" -le 1 ] || return 1
+  case "$method" in
+    PUT)
+      case "$url" in */status) return 1 ;; esac
+      case "$body" in '' | '{}') ;; *) return 1 ;; esac
+      PASS="a dashboard refresh" ;;
+    '' | GET)
+      [ "$bodies" -eq 0 ] || return 1
+      PASS="a read of a dashboard" ;;
+    *) return 1 ;;
+  esac
+}
+# sf|sfdx project deploy start --dry-run | validate, with an explicit source
+pass_deploy() {
+  local verb=${SW[3]} i=4 n=${#SW[@]} w name val dry= src=
+  while [ "$i" -lt "$n" ]; do
+    w=${SW[$i]}; i=$((i + 1))
+    case "$w" in
+      --dry-run) [ "$verb" = start ] || return 1; dry=1; continue ;;
+      --json | --concise | --verbose) continue ;;
+      --*=*) name=${w%%=*}; val=${w#*=} ;;
+      -?*) name=$w; [ "$i" -lt "$n" ] || return 1; val=${SW[$i]}; i=$((i + 1)) ;;
+      *) return 1 ;;
+    esac
+    case "$name" in
+      -d | --source-dir | -x | --manifest) [[ $val =~ $PATH_RE ]] || return 1; src=1 ;;
+      -m | --metadata) [[ $val =~ $METADATA_RE ]] || return 1; src=1 ;;
+      -o | --target-org) [[ $val =~ $ALIAS_RE ]] || return 1 ;;
+      -l | --test-level)
+        case "$val" in NoTestRun | RunSpecifiedTests | RunLocalTests | RunAllTestsInOrg | RunRelevantTests) ;; *) return 1 ;; esac ;;
+      -t | --tests) [[ $val =~ $TEST_RE ]] || return 1 ;;
+      -w | --wait) [[ $val =~ ^[0-9]+$ ]] || return 1 ;;
+      --api-version) [[ $val =~ $VERSION_RE ]] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+  [ -n "$src" ] || return 1
+  [ "$verb" = validate ] || [ -n "$dry" ] || return 1
+  PASS="a check-only deploy"
+}
+# sf|sfdx data query: one SOQL (-q, or -f from a file), read-only flags, a result file in data/
+pass_query() {
+  local i=3 n=${#SW[@]} w name val queries=0
+  while [ "$i" -lt "$n" ]; do
+    w=${SW[$i]}; i=$((i + 1))
+    case "$w" in
+      --json | -t | --use-tooling-api | --all-rows | -b | --bulk | --async) continue ;;
+      --*=*) name=${w%%=*}; val=${w#*=} ;;
+      -?*) name=$w; [ "$i" -lt "$n" ] || return 1; val=${SW[$i]}; i=$((i + 1)) ;;
+      *) return 1 ;;
+    esac
+    case "$name" in
+      -q | --query) queries=$((queries + 1)) ;;
+      -f | --file) [[ $val =~ $PATH_RE ]] || return 1; queries=$((queries + 1)) ;;
+      -r | --result-format) case "$val" in human | csv | json) ;; *) return 1 ;; esac ;;
+      -o | --target-org) [[ $val =~ $ALIAS_RE ]] || return 1 ;;
+      -w | --wait) [[ $val =~ ^[0-9]+$ ]] || return 1 ;;
+      --output-file) output_in_data "$val" || return 1 ;;
+      --api-version) [[ $val =~ $VERSION_RE ]] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+  [ "$queries" -eq 1 ] || return 1
+  PASS="a SOQL query"
+}
+PASS=
+case "$CMD" in
+  sf["$BLANK"]* | sfdx["$BLANK"]*)
+    if ! has '--apply|--rehearse|--prune' && plain_words; then
+      case "${SW[1]:-} ${SW[2]:-} ${SW[3]:-}" in
+        'api request rest') pass_rest ;;
+        'project deploy start' | 'project deploy validate') pass_deploy ;;
+        'data query '*) pass_query ;;
+      esac
+    fi ;;
+esac
+[ -z "$MATCH" ] && [ -z "$PASS" ] && exit 0
 
 # read-only and alone: a live flag it mentions is text, not an action
 read_only() {
@@ -369,6 +531,27 @@ This session cannot show Ryan the approval prompt (permission_mode $MODE; only
 default, acceptEdits, auto and plan can): needs-input. Run it in an interactive session,
 or Ryan runs it in his terminal."
 }
+# #204's pass: allowed in the modes a backed write is allowed in, from a subagent too, and
+# logged PASSED - no notification, nothing changes. In plan or an unknown mode it returns, and
+# the command is judged as before
+pass_through() {
+  case "$MODE" in
+    '"default"' | '"acceptEdits"' | '"auto"' | '"dontAsk"' | '"bypassPermissions"' | null) ;;
+    *) return 0 ;;
+  esac
+  local out
+  out=$(decide allow "PASSED by .claude/hooks/live_gate.sh - $PASS: it changes no record and no metadata, so it needs no prompt and no backup (ticket #204).
+$RUNBOOK") || out=
+  [ -n "$out" ] || return 0
+  { log PASSED; } 2>/dev/null
+  printf '%s\n' "$out"
+  exit 0
+}
+# a query or a dashboard read with nothing live in its text: allowed, or no decision as before
+if [ -z "$MATCH" ]; then
+  pass_through
+  exit 0
+fi
 
 if has "$SELF" || [ -n "$FORGED" ]; then
   case "$FORGED_KIND" in
@@ -527,6 +710,9 @@ if has "$DEPLOY" && DESTRUCTIVE=$(destructive_below); then
   not_automatic "A deploy of $DESTRUCTIVE, which holds a destructiveChanges*.xml: destructive changes delete
 what they list. A delete asks whatever the backups (ticket #146)."
 fi
+
+# #204: a dashboard refresh or a check-only deploy, once no self-approval and no delete is in it
+[ -n "$PASS" ] && pass_through
 
 # ---- a WRITE: automatic when it is one simple command, recognised, and backed up today
 TODAY=$(date +%F)
