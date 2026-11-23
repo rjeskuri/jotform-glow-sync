@@ -1899,11 +1899,13 @@ the picked club's partner, one calculation per partner, for the photo folders' n
 staff e-mail. It is turned on by hand, once per form, with `--partner-fill` on the sync (backup,
 dry run, apply, `form_status.py`); from then on the form's own rules keep it on and the runner
 keeps it (it never passes the flag). Refused on a form without the Club picker, and while a rule
-still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` from the backup
-taken before it (`--force` if it refuses a club renamed or retired since), then at once the sync
-by hand without the flag (dry run, `--apply`) and `form_status.py`: with no calculation into q331
-the fill stays off, and a club added since the backup gets back the rules the restore took from
-it, which the runner, reading a rules-only difference as `in-sync`, would never write.
+still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` with
+`--from properties-<stamp>.json`, the `backup_forms.py` snapshot taken before it (`--force` if it
+refuses a club renamed or retired since), then at once the sync by hand without the flag
+(`--region` on a regional form; dry run, `--apply`) and `form_status.py`. The dry run must print
+no `Partner fill:` line (`form_status.py` reads CLEAN with the fill on): with no calculation into
+q331 the fill stays off, and a club added since the backup gets back the rules the restore took
+from it, which the runner, reading a rules-only difference as `in-sync`, would never write.
 
 ### The one-time switch (`--same-name-switch`)
 

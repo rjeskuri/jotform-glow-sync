@@ -57,12 +57,14 @@ it never adds the fill, and on a form that has it, it keeps it.
    --roster data/roster_<date>.csv --partners data/partners_<date>.csv`: rules CLEAN, and a second
    dry run without the flag says `(conditions unchanged - skipping the rewrite)`.
 4. One test submission on the template, arranged to change nothing in Salesforce (the recipe in
-   RUNBOOK "Photos", step 3): pick a club, then, before submitting, switch to a club of a partner
-   in the middle of the fill's order - not the alphabetically first, whose rule runs last in
-   Jotform's walk (index 0 runs last) and would pass by luck. Check that the submission's q331 holds the second club's partner (proves the
-   false-turned condition does not blank q331, and that the literal text is written as is), that
-   q5 is the second club's entry as before the fill, and that the staff e-mail's "Partner" row
-   shows the partner. Then delete the test submission.
+   RUNBOOK "Photos", step 3): pick first a club of the alphabetically first partner in the fill's
+   order (its rule runs last in Jotform's walk: index 0 runs last), then, before submitting,
+   switch to a club of a partner in the middle of the order, so both readings are caught: a
+   condition turned false blanks q331, and the picker's listener runs every fill rule. Check that
+   the submission's q331 holds the second club's partner (proves the false-turned condition does
+   not blank q331, and that the literal text is written as is), that q5 is the second club's entry
+   as before the fill, and that the staff e-mail's "Partner" row shows the partner. Then delete
+   the test submission.
 5. Each regional form in turn (Latin America `262383455778067`, Asia `262383129464057`, Africa
    `262382821971058`; U.S `262382706852058` is disabled, `--disabled-ok`): steps 1-3 with
    `--region '<region>'` and its form id. No test submission on a regional form: the read-back is
@@ -73,17 +75,24 @@ it never adds the fill, and on a form that has it, it keeps it.
 
 Per form, in one sitting:
 
-1. `python3 restore_conditions.py --form <id> --from conditions-<stamp>.json` from step 1's
-   backup, dry run then `--apply`: the rules as they were before the fill. It refuses a snapshot
-   that tests a club the picker no longer offers (renamed or retired since step 1); then add
-   `--force` - step 2 rebuilds those rules.
-2. At once, the sync by hand without `--partner-fill` (step 2's command on today's exports, dry
-   run then `--apply`): with no calculation into q331 left the fill stays off, and every picker
-   entry gets its rules back. Not optional: a club added since step 1 passes the restore without
-   its show rule, its question 18 operand and its club-guard term, and the runner reads that
-   rules-only difference as `in-sync` - its roster would never show and, on a guarded form, its
-   mentors could not submit.
-3. `python3 tools/form_status.py` (step 3's command): rules CLEAN.
+1. `python3 restore_conditions.py --form <id> --from properties-<stamp>.json`, the stamp Rollout
+   step 1's `backup_forms.py` printed (`Snapshot <stamp> -> backups/`; it writes no
+   `conditions-<stamp>.json`, only the runner does), dry run then `--apply`: the rules as they
+   were before the fill. Not the default `properties-latest.json`: a later snapshot overwrites it.
+   It refuses a snapshot that tests a club the picker no longer offers (renamed or retired since
+   Rollout step 1); then add `--force` - step 2 rebuilds those rules.
+2. At once, the sync by hand without `--partner-fill` (Rollout step 2's command on today's
+   exports, with `--region '<region>'` for a regional form as in Rollout step 5; dry run then
+   `--apply`). The dry run must print no `Partner fill:` line: it prints one while any
+   calculation into q331 is left, and the sync would keep the fill - then the restored snapshot
+   postdates the fill: do not apply, go back to step 1 with the right stamp. With none left the
+   fill stays off, and every picker entry gets its rules back. Not optional: a club added since
+   Rollout step 1 passes the restore without its show rule, its question 18 operand and its
+   club-guard term, and the runner reads that rules-only difference as `in-sync` - its roster
+   would never show and, on a guarded form, its mentors could not submit.
+3. `python3 tools/form_status.py` (Rollout step 3's command): rules CLEAN, and a second sync dry
+   run prints no `Partner fill:` line and `(conditions unchanged - skipping the rewrite)`.
+   `form_status.py` does not see the fill (it reads CLEAN with it on): the dry run is that check.
 
 A revert of the code alone does not remove the fill from a form that has it until that form's next
 rewrite: roll the forms back first.
