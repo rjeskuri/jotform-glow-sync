@@ -8,8 +8,8 @@ intent: ticket #236, the prerequisite of #225 - the photo subfolders are named `
 
 # Plan: The Partner fill (q331)
 
-Ticket #236, the prerequisite of #225 (the Google Drive photo folders by partner and month; its
-plan, `docs/plans/2026-11-19-photo-folders-partner-month.md`, is on the #225 branch). Procedures:
+Ticket #236, the prerequisite of #225 (the Google Drive photo folders by partner and month,
+[plan](2026-11-19-photo-folders-partner-month.md)). Procedures:
 RUNBOOK "Club names two partners share" (the typed Partner box) and "Backup and restore
 (Jotform)".
 
