@@ -34,8 +34,10 @@ JOTFORM_COL = "jotform"
 CLUB_NAME = "5"      # Club Name textbox (Salesforce Account_Name__c reads it)
 PARTNER = "331"      # Partner textbox. With the Club picker it is hidden once no rule shows it
                      # (a club name two partners share is its own picker entry, SF_NAME_SEP
-                     # below) and only the staff notification e-mail reads it; without the
-                     # picker it is typed, and shown for an ambiguous club name
+                     # below); on a form with the Partner fill (sync_attendance_form.py
+                     # --partner-fill, #236) a calculation fills it with the picked club's
+                     # partner - the staff notification e-mail and the photo folders' names
+                     # read it. Without the picker it is typed, and shown for an ambiguous club name
 YEAR = "94"          # GLOW Club Year dropdown (1|2|3)
 MODULES = {"1": "14", "2": "92", "3": "93"}       # year -> module dropdown qid
 WEEKS = {8: "15", 10: "95", 14: "96", 15: "97"}   # session count -> dropdown qid
