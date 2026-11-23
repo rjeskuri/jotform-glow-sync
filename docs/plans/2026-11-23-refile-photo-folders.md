@@ -62,9 +62,12 @@ What a folder's name says (each name trimmed):
 | `<Partner> \| <Club> \| <MM-DD-YYYY> \| <Week>` (the layout, with its partner) | `<Partner>/<YYYY-MM>`, no lookup |
 | ` \| <Club> \| <MM-DD-YYYY> \| <Week>` (the layout, partner blank) | the club's partner, `<YYYY-MM>` |
 | `<Club> <MM-DD-YYYY>` (since 2026-10-30) | the club's partner, `<YYYY-MM>` |
-| `<Partner> <Club> <MM-DD-YYYY> <Week>` (spaces only, 2026-11-23; the week may be blank) | that partner, `<YYYY-MM>` (the date: the last date-shaped word) |
+| `<Partner> <Club> <MM-DD-YYYY> <Week>` (spaces only, 2026-11-23; the week may be blank) | the list's partner for that `<partner> <club>` pair, `<YYYY-MM>` |
 | `<Club>` (before 2026-10-30) | the club's partner, `undated` |
 | any of these with a date that is not a real one (`02-30-2026`) | stays: `bad-date` |
+
+In a name without ` | ` the last date-shaped word is the date, the words before it the club
+text, and every word after it is dropped (the week; also e.g. Drive's ` (1)`).
 
 The club's partner: every list row offers its club, `<club> - <partner>` (question 5 of a club
 two partners share), and both after `<partner> `, compared with case and spacing ignored; the

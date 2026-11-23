@@ -42,14 +42,15 @@
  *   `<Partner> | <Club> | <MM-DD-YYYY> [| <Week>]`   Plan.gs photoPath_: that partner, that month;
  *                                                     no lookup
  *   `| <Club> | <MM-DD-YYYY> [| <Week>]`             (a blank partner) the club, that month
- *   `<Club> <MM-DD-YYYY>`                            (since 2026-10-30) the last word the date:
- *                                                     the club before it, its month
+ *   `<Club> <MM-DD-YYYY>`                            (since 2026-10-30) the club, its month
  *   `<Partner> <Club> <MM-DD-YYYY> [<Week>]`          (the integration's spaces-only naming of
- *                                                     2026-11-23) the last date-shaped word the
- *                                                     date, anything after it the week: the
- *                                                     partner and club before it, its month
+ *                                                     2026-11-23) the partner and club, its month
+ *     these two, and any other name the two layouts do not match, read alike: the last
+ *     date-shaped word with a word before it is the date, the words before it the club text
+ *     (looked up below), every word after it dropped (the week; also e.g. Drive's ` (1)`)
  *   any of these, with a date that is not a real one stays: bad-date
- *   anything else (the club alone, before 2026-10-30) the whole name is the club, `undated`
+ *   anything else (no such word: the club alone, before 2026-10-30) the whole name is the club,
+ *   `undated`
  * The club's partner (REFILE_LIST): every row offers its club and `<club> - <partner>` (what
  * question 5 sends for a club two partners share), and each of them after `<partner> `,
  * compared whitespace-collapsed and lower-cased; the rows of the folder's own region first,

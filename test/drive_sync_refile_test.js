@@ -65,6 +65,15 @@
  *   T9  A move Drive answers but the read-back does not show: a line with REFILE_FAILED and the folder's
  *       name; the other folders still move (whether the run then throws is not pinned).
  *   T10 The move's resource is `{}` (G7): no key at all, so nothing is renamed or trashed by it.
+ *   T11 Ryan's requirement (2026-11-23, after his naming change and before his ` | ` fix the forms' Drive
+ *       integration named folders with spaces only): `<Partner> <Club> <MM-DD-YYYY> [<Week>]`, the week blank
+ *       on a special event. In any name without ` | ` the LAST date-shaped word is the date (this widens T1's
+ *       "last token") and every word after it is dropped (the week; also e.g. Drive's ` (1)` on a
+ *       `<club> <MM-DD-YYYY>` name, which then files to that date's month); the words before it are looked up
+ *       as G3 says, each row also offering `<partner> <club>` and `<partner> <club> - <partner>`. So the partner
+ *       before the club settles a club two partners share; a pair not on the list (another partner's club, a
+ *       partner the list does not have) is no-partner, never filed by the club or the partner alone; a
+ *       date-shaped word that is not a real date is bad-date, week or not.
  *
  * Every partner, club and file name is fictional (test/fixtures/make_fixture.py's word lists).
  */
@@ -263,6 +272,34 @@ runScenario('planRefile_ — layout names: a blank partner is looked up, a named
   ],
 }, LIST);
 
+runScenario('planRefile_ — the integration\'s spaces-only names of 2026-11-23, `<Partner> <Club> <MM-DD-YYYY> [<Week>]` (T11)', {
+  Africa: [
+    ['h01', 'Fixture Partner Alpha Sunrise Club 11-23-2026 4', [ALPHA, '2026-11']],
+    ['h02', 'Fixture Partner Alpha Bright Stars 11-23-2026', [ALPHA, '2026-11']],             // a special event: no week
+    ['h03', 'Fixture Partner Alpha Sunrise Club 11-23-2026 ', [ALPHA, '2026-11']],            // the blank week's space
+    ['h04', '  fixture partner ALPHA   harbor  club 1  12-01-2026   2 ', [ALPHA, '2026-12']], // case and spaces; a number in the club
+    ['h05', 'Fixture Partner Beta Golden Wings - Fixture Partner Beta 11-23-2026 2', [BETA, '2026-11']],
+    ['h06', 'Fixture Partner Delta Golden Wings 11-24-2026 1', [DELTA, '2026-11']],          // the club alone is ambiguous (b03)
+    ['h07', 'Fixture Partner Beta Golden Wings 01-04-2027 12', [BETA, '2027-01']],
+    ['h08', 'Fixture Partner Gamma Golden Wings 11-23-2026 3', [GAMMA, '2026-11']],          // no Africa row has it: every row
+    ['h09', 'Fixture Partner Beta Sunrise Club 11-23-2026 4', { code: 'no-partner' }],       // Alpha's club: not on the list
+    ['h10', 'Fixture Partner Zeta Sunrise Club 11-23-2026', { code: 'no-partner' }],          // a partner the list does not have
+    ['h11', 'Fixture Partner Alpha Morning Voices 11-23-2026 4', { code: 'no-partner' }],
+    ['h12', 'Fixture Partner Alpha Sunrise Club 02-30-2026 4', { code: 'bad-date' }],
+    ['h13', 'Fixture Partner Alpha Bright Stars 13-01-2026', { code: 'bad-date' }],
+    ['h14', 'Sunrise Club 10-30-2026 (1)', [ALPHA, '2026-10']],                               // text after a `<club> <date>`
+    ['h15', 'Sunrise Club 11-23-2026 4', [ALPHA, '2026-11']],                                 // a blank partner: the club alone
+  ],
+  Asia: [
+    ['h20', 'Fixture Partner Delta Silver Flames 11-23-2026 2', [DELTA, '2026-11']],
+    ['h21', 'Fixture Partner Beta Silver Flames 11-23-2026 2', [BETA, '2026-11']],           // Asia's row is Delta's: every row
+  ],
+  'Latin America': [
+    ['h30', 'Fixture Partner Alpha Morning Stars 11-30-2026', [ALPHA, '2026-11']],
+    ['h31', 'Fixture Partner Gamma Morning Stars 11-30-2026 4', { code: 'no-partner' }],
+  ],
+}, LIST);
+
 runScenario('planRefile_ — a date-shaped last token that is not a real date stays (G4: bad-date)', {
   Africa: [
     ['d01', 'Sunrise Club 02-30-2026', { code: 'bad-date' }],
@@ -395,9 +432,9 @@ console.log('\nplanRefile_ — generated regions against an independent oracle (
       if (r() < 0.3) t = t.replace(' ', '  ');
       return t;
     };
-    const lookup = (region, clubText) => {   // G3, written from the ruling
+    const lookup = (region, clubText) => {   // G3 and T11, written from the rulings
       const k = key(clubText);
-      const match = row => key(row.club) === k || key(row.club + ' - ' + row.partner) === k;
+      const match = row => [row.club, row.club + ' - ' + row.partner].some(n => key(n) === k || key(row.partner + ' ' + n) === k);
       let hits = list.filter(x => x.region === region && match(x));
       if (!hits.length) hits = list.filter(match);
       const partners = [...new Set(hits.map(x => x.partner))];
@@ -452,6 +489,19 @@ console.log('\nplanRefile_ — generated regions against an independent oracle (
         used.add(name);
         photos.push({ folder: F(id('f'), name), meaning });
       }
+      // T11: the integration's spaces-only names, `<Partner> <Club> <MM-DD-YYYY> [<Week>]`, after the others
+      while (photos.length < 13) {
+        const [y, m] = pick(MONTHS);
+        const date = mdy(y, m, 1 + Math.floor(r() * daysIn(y, m))), month = y + '-' + p2(m);
+        const row = pick(list);
+        const P = r() < 0.6 ? row.partner : pick(PG.concat([ZETA]));
+        const c = r() < 0.85 ? row.club + (r() < 0.2 ? ' - ' + row.partner : '') : pick(UNKNOWN);
+        const text = mangle(P + ' ' + c), bad = r() < 0.15, wk = r();
+        const name = text + ' ' + (bad ? pick(BAD) : date) + (wk < 0.6 ? ' ' + (1 + Math.floor(r() * 30)) : wk < 0.75 ? ' ' : '');
+        if (used.has(name)) continue;
+        used.add(name);
+        photos.push({ folder: F(id('f'), name), meaning: bad ? { code: 'bad-date' } : { club: text, month }, spaces: true });
+      }
       // the oracle: G4's meaning, G3's lookup, G6's levels
       const partnerFolders = P => roots.filter(x => x.folders.length && x.name === P);
       const decide = (ph) => {
@@ -493,6 +543,7 @@ console.log('\nplanRefile_ — generated regions against an independent oracle (
         want[ph.folder.id] = ph.out.path ?
           { region, kind: 'refile', path: ph.out.path, partnerId: ph.out.partnerId, monthId: ph.out.monthId, tag: ph.out.tag } :
           { region, kind: 'stay', code: ph.out.code, tag: ph.out.tag };
+        if (ph.spaces) bump('spaces ' + (ph.out.path ? 'refiled' : ph.out.code));
       }
       // the order Drive lists them in is no order: shuffle
       for (let i = roots.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [roots[i], roots[j]] = [roots[j], roots[i]]; }
@@ -511,7 +562,8 @@ console.log('\nplanRefile_ — generated regions against an independent oracle (
     }
   }
   const need = ['made', 'layout, made', 'partner reused', 'partner and month reused', 'ambiguous', 'no-partner', 'bad-date',
-                'holds-folders', 'duplicate-name', 'partner-folders', 'month-folders', 'exists'];
+                'holds-folders', 'duplicate-name', 'partner-folders', 'month-folders', 'exists',
+                'spaces refiled', 'spaces no-partner', 'spaces bad-date'];
   check('40 generated runs, every outcome among them: each region-root folder re-filed or held as the oracle says',
         !failures.length && need.every(k => tally[k] > 3),
         failures.length + ' wrong; first: ' + failures.slice(0, 3).join(' ;; ') + '; outcomes ' + JSON.stringify(tally));
@@ -829,6 +881,8 @@ const E2E = [
   ['A10', 'Africa', ' | Sunrise Club | 11-13-2026 | 2', ['IMG_5011.jpg'], [ALPHA, '2026-11']],
   ['A11', 'Africa', 'Bright Stars 10-09-2026', ['IMG_5012.jpg'], { code: 'duplicate-name' }],
   ['A12', 'Africa', 'Bright Stars 10-09-2026', ['IMG_5013.jpg', 'IMG_5014.jpg'], { code: 'duplicate-name' }],
+  ['A13', 'Africa', 'Fixture Partner Alpha Sunrise Club 11-23-2026 4', ['IMG_5022.jpg'], [ALPHA, '2026-11']],   // T11
+  ['A14', 'Africa', 'Fixture Partner Beta Sunrise Club 11-23-2026', ['IMG_5023.jpg'], { code: 'no-partner' }],  // T11
   ['S1', 'Asia', 'River Roots 10-16-2026', ['IMG_5015.jpg'], { code: 'exists' }],
   ['S2', 'Asia', 'River Roots 10-23-2026', ['IMG_5016.jpg', 'IMG_5017.jpg'], [GAMMA, '2026-10']],
   ['S3', 'Asia', 'Ocean Lights', ['IMG_5018.jpg'], [BETA, 'undated']],
