@@ -1921,11 +1921,24 @@ retired club's girls. Delete that leftover question in the builder first.
 it, and unhidden every mentor sees an optional box: on a form with the Club
 picker the sync hides it (`HIDE partner textbox (q331: no rule shows it; …)`,
 written after the rules). It is still submitted, blank, so the staff
-notification e-mail's "Partner" row is empty from then on. The runner does
+notification e-mail's "Partner" row is empty from then on (until the Partner fill below). The runner does
 not count the hide as a change: it rides along with the next roster change
 it applies on that form, or a hand apply, and that run's SyncLog `detail`
 does not name it (the run's log does: `HIDE partner textbox`). Since 2026-09-30
 it is hidden on all five forms.
+
+**The Partner fill** (#236, [plan](plans/2026-11-23-partner-fill.md)) fills the hidden q331 with
+the picked club's partner, one calculation per partner, for the photo folders' names and the
+staff e-mail. It is turned on by hand, once per form, with `--partner-fill` on the sync (backup,
+dry run, apply, `form_status.py`); from then on the form's own rules keep it on and the runner
+keeps it (it never passes the flag). Refused on a form without the Club picker, and while a rule
+still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` with
+`--from properties-<stamp>.json`, the `backup_forms.py` snapshot taken before it (`--force` if it
+refuses a club renamed or retired since), then at once the sync by hand without the flag
+(`--region` on a regional form; dry run, `--apply`) and `form_status.py`. The dry run must print
+no `Partner fill:` line (`form_status.py` reads CLEAN with the fill on): with no calculation into
+q331 the fill stays off, and a club added since the backup gets back the rules the restore took
+from it, which the runner, reading a rules-only difference as `in-sync`, would never write.
 
 ### The one-time switch (`--same-name-switch`)
 
