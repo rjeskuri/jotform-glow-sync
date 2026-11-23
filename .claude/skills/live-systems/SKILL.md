@@ -15,8 +15,8 @@ gates and rollbacks are in `.claude/skills/salesforce`.
 
 ## The gate
 `.claude/hooks/live_gate.sh` decides each of these: `--apply`, `--prune`, `--rehearse`, `clasp
-push` / `clasp:push`; raw `api.jotform.com` calls and Sheets writes; `sf`/`sfdx` deploys
-(check-only ones too), data writes, `apex run`, `sf api request` writes and the REST API by URL;
+push` / `clasp:push`; raw `api.jotform.com` calls and Sheets writes; `sf`/`sfdx` deploys,
+data writes, `apex run`, `sf api request` writes and the REST API by URL;
 `gh variable|secret set|delete`, `gh workflow enable|disable`, a `gh workflow run` that applies,
 `gh run rerun`, and any `gh api` (or `api.github.com`) call on `actions/`, `dispatches` or
 `graphql`. Since 2026-10-26 (#146) a live write whose backup from today is on record goes through
@@ -29,7 +29,10 @@ in the session, and are refused where no prompt can show; so is a write without 
 any other live command. It refuses outright a self-approval (setting `GLOW_LIVE_OK`, writing a
 shell startup file, `.env` or `~/.curlrc` - a copy onto one too -, `launchctl setenv`, a backup
 record or a `before/` made by hand). Every `curl -K`/`--config` asks, whatever the host. A
-read-only command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. The hook
+read-only command that only mentions a flag (`grep`, `cat`, `git log` …, alone) passes. Since
+#204 a Salesforce dashboard refresh (an empty-body `PUT`) and its read, a check-only deploy
+(`--dry-run`, `validate`) and `sf data query` pass with no prompt and no backup, each as one
+plain command (the salesforce skill has the shapes). The hook
 is a seatbelt: it does not see the connectors or a write through another program, and a write it
 does not see needs Ryan's explicit go in this conversation. RUNBOOK "Live gate (Claude Code)".
 
