@@ -4,7 +4,7 @@
     "HARNESS_TEST_CMD": "scripts/harness_tests.sh {files}",
     "HARNESS_WORKTREE_SETUP": "test -d ../../../.venv && ln -sfn ../../../.venv .venv || true",
     "HARNESS_ULTRAREVIEW": "off",
-    "HARNESS_SENSITIVE_PATHS": "data/**,backups/**,credentials/**,.env,.env.*"
+    "HARNESS_SENSITIVE_PATHS": "data/*.*,data/*/*.*,data/_from_worktree_*/**,data/auto_sync/**,data/backfill_*/**,data/clear_*/**,data/deactivate_clubs/**,data/live_*/**,data/module_fix_*/**,data/outreach_*/**,data/reconcile_*/**,data/rename_club/**,data/retire_*/**,data/reviewqueue_*/**,data/roster_*/**,data/sheet_*/**,data/sf_dupes_*/**,backups/**,credentials/**,.env,.env.*"
   },
   "permissions": {
     "allow": [
@@ -30,7 +30,13 @@
       "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git add:*)"
     ],
     "ask": [
-      "Read(./data/**)", "Read(./backups/**)",
+      "Read(./data/*.*)", "Read(./data/*/*.*)",
+      "Read(./data/_from_worktree_*/**)", "Read(./data/auto_sync/**)", "Read(./data/backfill_*/**)",
+      "Read(./data/clear_*/**)", "Read(./data/deactivate_clubs/**)", "Read(./data/live_*/**)",
+      "Read(./data/module_fix_*/**)", "Read(./data/outreach_*/**)", "Read(./data/reconcile_*/**)",
+      "Read(./data/rename_club/**)", "Read(./data/retire_*/**)", "Read(./data/reviewqueue_*/**)",
+      "Read(./data/roster_*/**)", "Read(./data/sheet_*/**)", "Read(./data/sf_dupes_*/**)",
+      "Read(./backups/**)",
       "Bash(git tag:*)",
       "Bash(python3 tools/derive_partner_regions.py:*)",
       "Bash(python3 test/fixtures/make_fixture.py --write)", "Bash(make fixtures)",
