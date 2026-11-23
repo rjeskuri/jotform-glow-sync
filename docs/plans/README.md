@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-23 | The photo folders already on the Shared Drive re-filed once under Region / Partner / Month | proposed |  | [2026-11-23-refile-photo-folders.md](2026-11-23-refile-photo-folders.md) |
 | 2026-11-23 | Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker | accepted |  | [2026-11-23-partner-fill.md](2026-11-23-partner-fill.md) |
 | 2026-11-19 | Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name | proposed |  | [2026-11-19-photo-folders-partner-month.md](2026-11-19-photo-folders-partner-month.md) |
 | 2026-11-19 | The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger | accepted |  | [2026-11-19-hourly-club-roster-refresh.md](2026-11-19-hourly-club-roster-refresh.md) |
