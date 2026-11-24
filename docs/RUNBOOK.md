@@ -3314,6 +3314,22 @@ and its empty `Girls_Present__c` is not a 0, so the blank-submissions report doe
 `sf_girls_present.py check` leaves merged corrections out (Signals, below). The message is
 filtered on, never selected or printed (on other batches it can quote a name).
 
+**A wrong answer fixed on request** (a mentor asks for a field to be changed, not girls added;
+first done 2026-11-23: the GLOW Club Year 2 → 3 on one Latin America submission and its batch).
+The value lives in two places, and both are fixed:
+- **Salesforce:** the batch and every `Attendance__c` row under it (the rows carry their own
+  `Module__c`, `Module_Week__c` and `Module_Year__c`). Read the batch and its rows first; then
+  the write connector, one record per call, Ryan's go, and read everything back. A batch `PATCH`
+  runs none of the processor (after-insert trigger only).
+- **Jotform:** `GET /submission/{id}` saved to `data/` first, then `POST /submission/{id}`
+  form-urlencoded `submission[<qid>]=<value>`, then read back. A change of year moves the module
+  answer too: the year (q94), the module dropdown of the new year (`glow.sync.MODULES`: q14,
+  q92, q93) and the hidden `Year_ID` (q102); `Module_ID` (q98) and `Week_ID` (q100) as needed.
+  Observed on 2026-11-23: **an empty value does not clear an answer** (the old year's module
+  dropdown keeps its answer; harmless, since what reads the module goes by the dropdown the year
+  names), and **the edit did not re-send the submission to Salesforce** (no new batch for the
+  club and date 20 minutes later), so no duplicate batch to deal with.
+
 **The measure** (Ryan's decisions of 2026-10-19, ticket #59,
 [plan](plans/2026-10-20-girls-attended-tiles.md); it replaces the two measures of 2026-10-15,
 ticket #35):
