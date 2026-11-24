@@ -1430,8 +1430,8 @@ the mover finds the partner and month folders by name (one in the trash does not
 makes them when missing. Any other name (`<Club> <MM-DD-YYYY>`, the club alone, a blank partner,
 a date that is not a real date) goes directly in the region folder, as before. The subfolder's
 own name never changes, and a same-name folder counts only at its own path (a merge, a
-`REFUSED`). The folders already on the Shared Drive stay where they are (their re-filing is a
-separate follow-up: their names carry no partner).
+`REFUSED`). The folders already on the Shared Drive stay where they are until their one-time
+re-filing ("Re-filing the existing folders (#237)", below: their names carry no partner).
 
 The order, each live step on Ryan's go (Ryan, 2026-10-22):
 
@@ -1507,6 +1507,23 @@ paste of `Plan.gs` and `Mover.gs` (the manifest unchanged: no new scope, no new 
 `previewMoves` (the existing subfolders log as before, without a target path; nothing changes),
 then `installTrigger`. The new code files only the new naming under partner and month, so it
 can go live before any form's naming changes.
+
+**Re-filing the existing folders (#237)** (Ryan, once, on his go, after #225's naming is live on
+the forms; the [plan](plans/2026-11-23-refile-photo-folders.md), Rollout). The club folders the
+mover filed before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/`, or
+`<Region>/<Partner>/undated/` for a name with no date, keeping their names and photos. In short:
+the Roster and Partners exports, `tools/refile_list.py` (it writes `RefileList.gs`, the club →
+partner list), `removeTrigger`, the paste of `drive-sync/Refile.gs` and that file into the
+project, `installTrigger`, `previewRefile` (the dry run: every folder directly in a region folder
+with its target, or its code and reason for staying; it reads one folder per Drive call, #262, so
+run it again until a run logs `cycle complete`, each `TIME_BUDGET` line saying what is left),
+**Ryan reviews that log**, then `refileExisting` likewise until a run moves nothing and logs no
+`TIME_BUDGET`, `previewRefile` again (`would refile 0`), and both files
+deleted from the project. A folder whose partner is not found stays where it is, listed with the
+reason. Undo: move a folder back into the region folder by hand (nothing is renamed or deleted).
+`REFILE_FAILED <Region> "<name>"`: Drive refused the move, or its read-back does not show the
+folder in its month folder; the rest goes on, the run ends in an error, look for the folder by
+hand.
 
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
