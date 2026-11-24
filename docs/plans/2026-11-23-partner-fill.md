@@ -1,7 +1,8 @@
 ---
 title: Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker
 author: Claude (ticket #236)
-status: accepted      # ticket #236; the code lands offline, every live step waits on Ryan's go
+status: done          # live on the template and the three regional forms 2026-11-23
+done: 2026-11-23
 created: 2026-11-23
 intent: ticket #236, the prerequisite of #225 - the photo subfolders are named `{Partner} | {Club Name} | {Date} | {Week}`, and q331 is blank on every form with the Club picker
 ---
@@ -116,4 +117,38 @@ neighbouring suites (`sync_conditions_test`, `same_name_test`, `form_status_test
 
 ## Result
 
-Pending the live rollout (Ryan's go, one form at a time).
+Live on all four forms on 2026-11-23, each step on Ryan's go. Code: `d15cd35` (PR #260).
+Counts only.
+
+- **Template** (`262352490535154`): backup `properties-2026-11-23T203311.json`. The dry run also
+  planned the template's catch-up with the Roster, because the runner never syncs the template:
+  1 new roster, 3 rosters and the Club picker updated, and the rules that go with them. Ryan
+  chose to apply both together. The apply wrote `conditions: 372 kept, 50 new, 6 dropped` (46 of
+  the new rules are the fill, one per partner) and `REPLACE conditions (422 rules)`. Read back:
+  `form_status` CLEAN, 0 flagged; the second dry run without the flag: `Partner fill: ... 46
+  rule(s)`, `nothing to do`.
+- **Test submission (step 4)**, Ryan: club picked first from the alphabetically first partner,
+  then switched to a mid-order partner's club with a `Success` batch on 2026-11-22, one girl
+  already on that batch ticked. The staff e-mail showed Partner = the second club's partner and
+  Club Name = the second club. Salesforce: the test batch was `Failed` "Duplicate" with 0 rows;
+  the original was unchanged (12 rows, `Girls_Present__c` 12); partner-less Club accounts
+  unchanged (2). The test batch was deleted with the write connector on Ryan's go and read back
+  as gone. Ryan deletes the test submission in Jotform.
+- **Regional forms**, each applied and read back before the next (backups, stamps on the Mac's clock in JST: `2026-11-23T205457`,
+  `T205507`, `T205510`):
+
+  | Form | Fill rules | Conditions | `form_status` | Second dry run |
+  |---|---|---|---|---|
+  | Latin America | 9 | 72 kept, 9 new, 0 dropped (81) | CLEAN | nothing to do |
+  | Asia | 10 | 132 kept, 10 new, 0 dropped (142) | CLEAN | nothing to do |
+  | Africa | 21 | 235 kept, 21 new, 0 dropped (256) | CLEAN | nothing to do |
+
+- `tools/auto_sync.py` (dry run): Africa, Asia and Latin America `in-sync`; U.S `skipped -
+  form DISABLED`.
+- Ryan changed the Google Drive integration's naming to include Partner and Week on 2026-11-23,
+  after the template test. The regional forms' read-back is their first real submission's staff
+  e-mail, with its Partner row filled, and its photo subfolder filed under `<Region>/<Partner>/
+  <YYYY-MM>/` by the mover.
+
+Live: Partner fill on the template, Latin America, Asia and Africa, 2026-11-23 11:44-11:58
+UTC, Ryan's go.
