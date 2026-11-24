@@ -384,7 +384,9 @@ sharing), so #182's whole-drive searches could never run live. In `drive-sync/Mo
   parent, its `createdTime` and whether it holds something that stays (a file not due within a
   day, or a region folder), a region subfolder's name; and every file due within a day, by id.
   That fits a few thousand folders in the Script Properties (about 55 bytes a folder with
-  Drive's 33-character ids), in values of 8,000 ASCII characters under
+  Drive's 33-character ids, more for a region folder's direct subfolders, whose names are kept;
+  about 50 a kept file; 500 KB in all, both entry points' reads and every other property
+  counted), in values of 8,000 ASCII characters under
   `RETENTION_STATE_PREVIEW_` / `RETENTION_STATE_APPLY_`, the dry run's and the real run's apart;
   no other property is written. A kept read is dropped and started again when `RETENTION_DAYS`,
   the drive, a region or a region folder changed, when it cannot be read back in full, or when
