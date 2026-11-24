@@ -75,6 +75,59 @@
  *       partner the list does not have) is no-partner, never filed by the club or the partner alone; a
  *       date-shaped word that is not a real date is bad-date, week or not.
  *
+ * Ticket #262 (2026-11-24): the live dry run stopped in the first region, Drive refusing the batched listing (up to
+ * REFILE_BATCH parents joined by `or`) with "The attempted action requires shared drive membership.": the account that
+ * runs the mover reaches the region folders through folder sharing and is no member of the Shared Drive. Ryan: read
+ * folder by folder, slower is fine, do not add the account to the drive. The test-author's readings for it:
+ *   T12 Every Drive.Files.list the re-filing sends names exactly one folder: one `'<id>' in parents` term, ANDed with
+ *       the rest (trashed, mimeType, name). Every scenario's fake Drive refuses, with the live error, a query naming
+ *       two or more parents, and one naming none (a whole-drive listing needs the same membership: #183). corpora /
+ *       driveId as listSharedDrive_ sends them (the fake does not tell them apart). The fake answers only the fields
+ *       asked (`files(a, b)`; none given: kind, id, name, mimeType); a listing that returns files while asking for their
+ *       `name` (or every field) asks Drive for a file's name (G8), and so does DriveApp File.getName.
+ *   T13 The budget scenarios run on a fake clock: the sandbox's `Date` (Date.now(), new Date()) reads a clock that
+ *       advances STEP ms at each Drive.Files or DriveApp call, 10 minutes between runs, and never otherwise.
+ *       STEP = RUN_BUDGET_MS / 2 / 120: a run's read budget (`started + RUN_BUDGET_MS / 2`) holds about 120 Drive
+ *       calls, the whole run about 240, and no run may pass Apps Script's 6 minutes. The re-filing reads time only
+ *       from Date.now() / new Date(). There Files.list answers up to 25 items a page (pageSize honoured up to that);
+ *       elsewhere two a page, as before.
+ *   T14 What one execution learns is kept for the next in the Script Properties (PropertiesService.
+ *       getScriptProperties(): getProperty, getProperties, getKeys, setProperty, setProperties(obj),
+ *       deleteProperty), the one store the fake offers: no CacheService (it may drop an entry at any time, and a read
+ *       that loses its progress never ends), no User or Document properties, nothing written to Drive. The fake keeps
+ *       Apps Script's limits: a value over 9 KB (9216 bytes, UTF-8) throws `Argument too large: value`; a store whose
+ *       keys and values together pass 500 KB (512000 bytes) throws `You have exceeded the property storage quota.`
+ *       It refuses (throws) deleteAllProperties, setProperties(obj, true), and any change to or delete of a property
+ *       set before the first run (SOURCE_FOLDER_*, TARGET_FOLDER_*). The big region's progress does not fit one value
+ *       (300 folders with Drive-length ids).
+ *   T15 A run that has not read a region in full logs, for it, a line holding `TIME_BUDGET` and the region's name
+ *       (one line per region), and once it has listed the region folder itself, `<n> ... left to read`
+ *       (/(\d+)[^\d\n]{0,40}left to read/), n > 0 the folders whose listing the region still needs; n falls from each
+ *       run to the next within a cycle (T16). Such a run logs none of that region's plan (no line naming one of its
+ *       folders with a target path or a stay code) and moves none of its folders. Other wording and a run estimate
+ *       are free.
+ *   T16 A cycle: the runs from one to the first that logs no TIME_BUDGET line (every configured region read in full
+ *       and planned; with refileExisting its moves done). A region small enough is read and planned in one run, as
+ *       before (the single-run scenarios). A region's plan is logged (T5's lines) in the run that completes its read,
+ *       with the outcomes planRefile_ gives on the region as the Drive then is, read in one go: its folders as that
+ *       run lists the region folder (one added, trashed or moved since an earlier run of the cycle counts as it now
+ *       is), their contents as read during the cycle. A region read in full is not read again within its cycle (a
+ *       region after it would wait forever). The run after a cycle's end starts a new one from the Drive as it then
+ *       is, planning nothing from what an earlier cycle read; when a cycle ends, what the re-filing keeps in the
+ *       Script Properties is under 2 KB (the config unchanged).
+ *   T17 refileExisting moves a region's folders only from the plan of the region read in full: each move is one
+ *       planRefile_ makes on the Drive as it is at the start of that run, none before the read is complete. The
+ *       moves a run leaves are made by the next runs from that read, before the region is read again (each
+ *       re-checked as G7 says); a run that leaves some logs a TIME_BUDGET line with `<n> ... left` (as the done
+ *       line does). A partner or month folder the mover made since the read (a `<Partner>` in the region folder, a
+ *       `<YYYY-MM>` in a partner folder) is used, never a second of its name made. A folder trashed, renamed or
+ *       moved since its read is not moved by that read's plan; a renamed one is re-filed by its new name, and one
+ *       that appears between runs is re-filed, by a later run of the cycle or by the next cycle.
+ *       Bounds, with W = 2 x (folders directly in the big region folder) + (the folders in them) + its listing
+ *       pages + 2, the Drive calls of one full read: a preview cycle within ceil(W / 60) + 2 runs; every folder of
+ *       the first plan in its target within ceil(W / 60) + ceil(8 x <moves> / 240) + 2 runs; then a quiet cycle
+ *       (no move, no TIME_BUDGET) within 2 x (ceil(W / 60) + 2) + 2 more.
+ *
  * Every partner, club and file name is fictional (test/fixtures/make_fixture.py's word lists).
  */
 const fs = require('fs');
@@ -600,13 +653,36 @@ console.log('\nplanRefile_ — pure: no Google service, inputs unchanged');
  * its current parent), a folder within the Shared Drive too, never a My Drive folder into it, and refuses any
  * resource key but `trashed`. Every DriveApp and Drive call is recorded (G9); `hooks` change an item at the
  * first access to it by id (T8); a `silent` id's move is answered but not done (T9). Unknown members throw.
+ * #262: Files.list refuses a query naming other than one parent with the live error, and every query is recorded
+ * with the run it came in (T12); list and get answer only the fields asked; the Script Properties keep Apps Script's
+ * limits and the config (T14); with `clocked` the sandbox's Date is the fake clock and a page holds up to `pageCap`
+ * items (T13).
  */
+const MEMBERSHIP = 'API call to drive.files.list failed with error: The attempted action requires shared drive membership.';
+const READ_CALLS = 120;   // T13: the Drive calls one run's read budget holds on the fake clock
+const RUN_BUDGET = ctx ? vm.runInContext('typeof RUN_BUDGET_MS === "number" ? RUN_BUDGET_MS : 0', ctx) : 0;
+const STEP = (RUN_BUDGET || 4.5 * MIN) / 2 / READ_CALLS;
+const BIG_PAGE = 25;
+const VALUE_MAX = 9 * 1024, STORE_MAX = 500 * 1024;
+const DEFAULT_FIELDS = ['kind', 'id', 'name', 'mimeType'];
+/** The fields a Files.list (`nested`: `files(...)`) or Files.get asks for: a Set, or null for every field. */
+function fieldsAsked(fields, nested) {
+  if (fields === undefined || fields === null || fields === '') return new Set(DEFAULT_FIELDS);
+  const f = String(fields), split = t => t.split(',').map(s => s.trim()).filter(Boolean);
+  if (!nested) return f.includes('*') ? null : new Set(split(f));
+  const m = /files\(([^)]*)\)/.exec(f);
+  if (m) return m[1].includes('*') ? null : new Set(split(m[1]));
+  const slash = split(f).filter(s => s.startsWith('files/')).map(s => s.slice(6));
+  if (slash.length) return slash.includes('*') ? null : new Set(slash);
+  return /\bfiles\b|\*/.test(f) ? null : new Set();
+}
 const ROOT = 'drive-root-237';
 const REGION_IDS = { Africa: 'tgt-africa', Asia: 'tgt-asia' };
 const SOURCE_IDS = { Africa: 'src-africa', Asia: 'src-asia' };
 
+/** The predicate of a Files.list `q`; its `parents` are the ids its `'<id>' in parents` terms name (T12). */
 function parseDriveQuery(q) {
-  const src = String(q), toks = [];
+  const src = String(q), toks = [], parents = [];
   const re = /\s*(?:'((?:[^'\\]|\\.)*)'|(!=|=|\(|\))|([A-Za-z]+))/y;
   let i = 0;
   while (i < src.length && src.slice(i).trim()) {
@@ -628,6 +704,7 @@ function parseDriveQuery(q) {
       p++;
       if (!toks[p] || toks[p].word !== 'parents') fail('`parents` expected');
       p++;
+      parents.push(t.str);
       return m => m.parent === t.str;
     }
     if (t.word === 'trashed') {
@@ -659,12 +736,18 @@ function parseDriveQuery(q) {
   function orExpr() { let a = andExpr(); while (isWord('or')) { p++; const l = a, r = andExpr(); a = m => l(m) || r(m); } return a; }
   const test = orExpr();
   if (p !== toks.length) fail('trailing terms');
+  test.parents = parents;
   return test;
 }
 
-function fakeDrive() {
+function fakeDrive(opts) {
+  opts = opts || {};
+  const pageCap = opts.pageCap || 2;
   const items = new Map(), logs = [], creates = [], updates = [], banned = [], calls = [];
+  const queries = [], refused = [], nameAsks = [], state = { run: 0 };
   const hooks = new Map(), silent = new Set();
+  const clock = { now: Date.UTC(2026, 10, 24, 9, 0, 0), step: opts.clocked ? STEP : 0 };
+  const tick = () => { clock.now += clock.step; };
   const t0 = Date.now();
   let n = 0;
   const add = (parent, name, isFolder, o) => {
@@ -704,7 +787,8 @@ function fakeDrive() {
   const fileApi = id => {
     const m = () => items.get(id);
     return guard('File', {
-      getId: () => id, getName: () => m().name, getSize: () => m().size, getMimeType: () => 'image/jpeg',
+      getId: () => id, getName: () => { nameAsks.push('File.getName'); return m().name; }, getSize: () => m().size,
+      getMimeType: () => 'image/jpeg',
       getLastUpdated: () => new Date(m().updatedAt), getDateCreated: () => new Date(m().createdAt), isTrashed: () => m().trashed,
       getParents: () => iter(m().parent ? [folderApi(m().parent)] : []),
       moveTo: () => refuse('File.moveTo'), setTrashed: () => refuse('File.setTrashed'), setName: () => refuse('File.setName'),
@@ -715,15 +799,21 @@ function fakeDrive() {
     return guard('Folder', {
       getId: () => id, getName: () => m().name, isTrashed: () => m().trashed,
       getLastUpdated: () => new Date(m().updatedAt), getDateCreated: () => new Date(m().createdAt),
-      getFolders: () => iter(kids(id).filter(k => k.isFolder).map(k => folderApi(k.id))),
-      getFoldersByName: nm => iter(kids(id).filter(k => k.isFolder && k.name === nm).map(k => folderApi(k.id))),
-      getFiles: () => iter(kids(id).filter(k => !k.isFolder).map(k => fileApi(k.id))),
-      getFilesByName: nm => iter(kids(id).filter(k => !k.isFolder && k.name === nm).map(k => fileApi(k.id))),
+      getFolders: () => { tick(); return iter(kids(id).filter(k => k.isFolder).map(k => folderApi(k.id))); },
+      getFoldersByName: nm => { tick(); return iter(kids(id).filter(k => k.isFolder && k.name === nm).map(k => folderApi(k.id))); },
+      getFiles: () => { tick(); return iter(kids(id).filter(k => !k.isFolder).map(k => fileApi(k.id))); },
+      getFilesByName: nm => { tick(); return iter(kids(id).filter(k => !k.isFolder && k.name === nm).map(k => fileApi(k.id))); },
       getParents: () => iter(m().parent ? [folderApi(m().parent)] : []),
       createFolder: nm => refuse('Folder.createFolder ' + nm), moveTo: () => refuse('Folder.moveTo'),
       setTrashed: () => refuse('Folder.setTrashed'), setName: () => refuse('Folder.setName'),
     });
   }
+  const pick = (r, want) => {
+    if (!want) return r;
+    const o = {};
+    for (const k of want) if (has(r, k)) o[k] = r[k];
+    return o;
+  };
   const rep = m => {
     const r = { kind: 'drive#file', id: m.id, name: m.name, mimeType: m.isFolder ? FOLDER : 'image/jpeg',
                 parents: m.parent ? [m.parent] : [], trashed: m.trashed, explicitlyTrashed: m.explicitlyTrashed,
@@ -735,26 +825,37 @@ function fakeDrive() {
   const Files = guard('Drive.Files', {
     list(args) {
       calls.push('Drive.Files.list');
+      tick();
       if (!args || typeof args.q !== 'string') throw new Error('fake Files.list: q required');
       const test = parseDriveQuery(args.q);
+      queries.push({ q: args.q, fields: args.fields, parents: test.parents.slice(), run: state.run, refused: test.parents.length !== 1 });
+      if (test.parents.length !== 1) {   // T12: the live refusal; a whole-drive listing too (#183)
+        refused.push(args.q);
+        throw new Error(MEMBERSHIP);
+      }
       const all = args.supportsAllDrives === true && args.includeItemsFromAllDrives === true;
       let pool = [...items.values()].filter(m => m.id !== ROOT && (all || !m.shared));
       if (args.corpora === 'drive') pool = pool.filter(m => m.shared && args.driveId === ROOT);
       const hits = pool.filter(test);
       const start = args.pageToken ? Number(args.pageToken) : 0;
-      const out = { files: hits.slice(start, start + 2).map(rep) };
-      if (start + 2 < hits.length) out.nextPageToken = String(start + 2);
+      const size = Math.max(1, Math.min(pageCap, Number(args.pageSize) || 100));
+      const page = hits.slice(start, start + size), want = fieldsAsked(args.fields, true);
+      if ((want === null || want.has('name')) && page.some(m => !m.isFolder)) nameAsks.push(args.q);
+      const out = { files: page.map(m => pick(rep(m), want)) };
+      if (start + size < hits.length) out.nextPageToken = String(start + size);
       return out;
     },
     get(id, args) {
       calls.push('Drive.Files.get');
+      tick();
       byId(id);
       const m = get(id);
       if (m.shared && !(args && args.supportsAllDrives === true)) throw new Error('File not found: ' + id + ' (fake: supportsAllDrives)');
-      return rep(m);
+      return pick(rep(m), fieldsAsked(args && args.fields, false));
     },
     create(resource, media, args) {
       calls.push('Drive.Files.create');
+      tick();
       creates.push({ resource: JSON.parse(JSON.stringify(resource || {})), args: Object.assign({}, args || {}) });
       const parents = resource && resource.parents;
       if (!resource || resource.mimeType !== FOLDER || !Array.isArray(parents) || parents.length !== 1) {
@@ -767,6 +868,7 @@ function fakeDrive() {
     },
     update(resource, fileId, media, args) {
       calls.push('Drive.Files.update');
+      tick();
       byId(fileId);
       resource = resource || {};
       args = args || {};
@@ -796,32 +898,77 @@ function fakeDrive() {
     props['SOURCE_FOLDER_' + reg.toUpperCase()] = SOURCE_IDS[reg];
     props['TARGET_FOLDER_' + reg.toUpperCase()] = REGION_IDS[reg];
   }
+  // T14: the Script Properties as Apps Script keeps them, the mover's config untouchable
+  const config = Object.assign({}, props);
+  const bytes = s => Buffer.byteLength(String(s), 'utf8');
+  const sizeOf = (p, keys) => (keys || Object.keys(p)).reduce((n, k) => n + bytes(k) + bytes(p[k]), 0);
+  const storeRefuse = what => {
+    banned.push('Properties: ' + what);
+    throw new Error('fake Properties: the re-filing may not ' + what + ' (T14: the mover\'s config stays)');
+  };
+  const putAll = obj => {
+    const next = Object.assign({}, props);
+    for (const k of Object.keys(obj)) {
+      const key = String(k), value = String(obj[k]);
+      if (has(config, key) && value !== config[key]) storeRefuse('change ' + key);
+      if (bytes(value) > VALUE_MAX) throw new Error('Argument too large: value');
+      next[key] = value;
+    }
+    if (sizeOf(next) > STORE_MAX) {
+      throw new Error('You have exceeded the property storage quota. Please remove some properties and try again.');
+    }
+    for (const k of Object.keys(next)) props[k] = next[k];
+  };
+  const properties = guard('Properties', {
+    getProperty: k => (has(props, String(k)) ? props[String(k)] : null),
+    getProperties: () => Object.assign({}, props),
+    getKeys: () => Object.keys(props),
+    setProperty: (k, v) => { putAll({ [String(k)]: v }); return properties; },
+    setProperties: (obj, deleteAllOthers) => {
+      if (deleteAllOthers) storeRefuse('delete every other property (setProperties with deleteAllOthers)');
+      putAll(obj || {});
+      return properties;
+    },
+    deleteProperty: k => {
+      if (has(config, String(k))) storeRefuse('delete ' + k);
+      delete props[String(k)];
+      return properties;
+    },
+    deleteAllProperties: () => storeRefuse('delete all properties'),
+  });
   const say = (...a) => logs.push(a.map(String).join(' '));
   const globals = {
     console: { log: say, info: say, warn: say, error: say },
     DriveApp: guard('DriveApp', {
       getFolderById: id => {
         calls.push('DriveApp.getFolderById');
+        tick();
         byId(id);
         if (!get(id).isFolder) throw new Error('not a folder (fake)');
         return folderApi(id);
       },
       getFileById: id => {
         calls.push('DriveApp.getFileById');
+        tick();
         byId(id);
         if (get(id).isFolder) throw new Error('not a file (fake)');
         return fileApi(id);
       },
     }),
     Drive: guard('Drive', { Files }),
-    PropertiesService: guard('PropertiesService', {
-      getScriptProperties: () => guard('Properties', { getProperty: k => (has(props, k) ? props[k] : null) }),
-    }),
+    PropertiesService: guard('PropertiesService', { getScriptProperties: () => properties }),
     LockService: guard('LockService', {
       getScriptLock: () => guard('Lock', { tryLock: () => true, waitLock: () => undefined, releaseLock: () => undefined, hasLock: () => true }),
     }),
     ScriptApp: guard('ScriptApp', { getProjectTriggers: () => [] }),
   };
+  if (opts.clocked) {   // T13: the sandbox's Date reads the fake clock (a vm context's own `Date` shadows the builtin)
+    const RealDate = Date;
+    globals.Date = class extends RealDate {
+      constructor(...a) { if (a.length) super(...a); else super(clock.now); }
+      static now() { return clock.now; }
+    };
+  }
   /** The folder names from the region folder down to the item's parent (the Shared Drive's root left out). */
   const where = id => {
     const out = [];
@@ -835,6 +982,9 @@ function fakeDrive() {
     return level;
   };
   return { add, items, logs, creates, updates, banned, calls, hooks, silent, globals, where, foldersAt, kids,
+           queries, refused, nameAsks, state, clock, props,
+           ownStoreBytes: () => sizeOf(props, Object.keys(props).filter(k => !has(config, k))),
+           configIntact: () => Object.keys(config).every(k => props[k] === config[k]),
            snapshot: () => JSON.stringify([...items.values()].map(m => [m.id, m.name, m.parent, m.trashed, m.shared])) };
 }
 
@@ -919,6 +1069,20 @@ const target = x => [x[1]].concat(x[4]);
 const noFileNames = text => !/IMG_\d+/.test(text) && !/Nimbleford/.test(text);
 const driveCalls = env => env.calls.filter(c => /^Drive/.test(c));
 
+/** T12 and G8 on what the runs asked Drive: each listing names one parent, none refused, no file's name asked. */
+function checkQueries(what, env, ran) {
+  const many = env.queries.filter(x => x.parents.length > 1), none = env.queries.filter(x => !x.parents.length);
+  check(what + ': no Drive query names more than one parent (T12: ' + env.queries.length + ' listing(s))',
+        ran && env.queries.length > 0 && !many.length,
+        many.length ? many.length + ', e.g. ' + many[0].q.slice(0, 160) : ran ? '' : 'it did not run');
+  check(what + ': every listing names exactly one folder (none a whole-drive query), and Drive refused none',
+        ran && !none.length && !env.refused.length,
+        (none.length ? 'no parent: ' + none[0].q.slice(0, 120) + '; ' : '') + env.refused.length + ' refused' +
+        (env.refused.length ? ' (' + MEMBERSHIP + ')' : ''));
+  check(what + ': Drive was never asked for a file\'s name (G8)', ran && !env.nameAsks.length,
+        env.nameAsks.length ? env.nameAsks.length + ', e.g. ' + env.nameAsks[0].slice(0, 120) : '');
+}
+
 console.log('\npreviewRefile — the dry run: plans and logs every folder, makes and moves nothing (G8, T5)');
 {
   const env = fakeDrive();
@@ -949,6 +1113,7 @@ console.log('\npreviewRefile — the dry run: plans and logs every folder, makes
           lines.some(l => l.includes(name) && l.includes('holds-folders')), lines.filter(l => l.includes(name)).join(' || ') || 'none');
   }
   check('the log (not empty) names no photo', ran && noFileNames(r.text), ran ? (r.text.match(/IMG_\d+|Nimbleford/) || [''])[0] : 'it did not run');
+  checkQueries('the dry run', env, ran);
 }
 
 console.log('\nrefileExisting — the real run: each folder moved whole by one update, partner and month folders made once (G7)');
@@ -1021,6 +1186,7 @@ console.log('\nrefileExisting — the real run: each folder moved whole by one u
   check('the folders in the trash are left alone', ran && env.items.get('TR').trashed && env.items.get('DEAD').trashed &&
         same(env.where('TR'), ['Africa']) && same(env.where('DEAD'), ['Africa']), JSON.stringify([env.where('TR'), env.where('DEAD')]));
   check('the log names no photo', ran && noFileNames(r.text), ran ? (r.text.match(/IMG_\d+|Nimbleford/) || [''])[0] : notRun);
+  checkQueries('the real run', env, ran);
 
   // a re-run after a complete run: nothing left to do
   const made = env.creates.length, moved = env.updates.length, snap = env.snapshot();
@@ -1072,6 +1238,483 @@ console.log('\npreviewRefile / refileExisting — REFILE_LIST missing or malform
             (r.threw || 'no error') + '; Drive calls: ' + driveCalls(env).slice(0, 4).join(', '));
     }
   }
+}
+
+// ---------------------------------------------------------------- #262: a region bigger than one run's read budget
+const ETA = 'Fixture Partner Eta', THETA = 'Fixture Partner Theta';
+const CLUB_WORDS = ['Bright', 'Rising', 'Golden', 'Silver', 'Morning', 'Evening', 'Northern', 'Southern', 'River', 'Mountain',
+                    'Ocean', 'Valley'];   // make_fixture.py's RANDOM_CLUB_WORDS and _NOUNS
+const CLUB_NOUNS = ['Stars', 'Lights', 'Flames', 'Voices', 'Wings', 'Roots'];
+const BIG_PARTNERS = [ALPHA, BETA, GAMMA, DELTA, ETA, THETA];
+/** The big region's clubs [{club, partners}]: none, off the list (no-partner); two, ambiguous. */
+const BIG_CLUBS = [];
+CLUB_WORDS.forEach((w, a) => CLUB_NOUNS.forEach((nn, b) => {
+  const i = a * CLUB_NOUNS.length + b, p = (a * 5 + b) % 6;
+  BIG_CLUBS.push({ club: w + ' ' + nn,
+                   partners: i % 17 === 5 ? [] : i % 13 === 7 ? [BIG_PARTNERS[p], BIG_PARTNERS[(p + 1) % 6]] : [BIG_PARTNERS[p]] });
+}));
+const BIG_LIST = [].concat(...BIG_CLUBS.map(c => c.partners.map(p => ({ region: 'Africa', partner: p, club: c.club })))).concat([
+  { region: 'Asia', partner: GAMMA, club: 'Rising Harbor Club' }, { region: 'Asia', partner: BETA, club: 'Mountain Path Club' },
+  { region: 'Asia', partner: DELTA, club: 'Southern Bridge Club' }]);
+const onlyPartner = P => BIG_CLUBS.filter(c => c.partners.length === 1 && c.partners[0] === P).map(c => c.club);
+const BIG_MONTHS = [[2026, 9], [2026, 10], [2026, 11], [2026, 12], [2027, 1]];
+const BIG_BAD = ['02-30-2026', '13-40-2026', '04-31-2027', '02-29-2027', '10-32-2026', '11-31-2026'];
+const BIG_ROOTS = 300;
+const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+let bigImg = 7000;
+
+/**
+ * The big Africa region folder (BIG_ROOTS folders directly in it, Drive-length ids, listed in no order) and a small Asia
+ * one. Each folder G5/G6 hold is there (an empty folder named like a partner, a partner folder with a folder already in
+ * its month, two partner folders of a name, two month folders of a name, a folder of files named like a partner, three
+ * pairs of one name), with an anchor: the outcome the rulings give it, independent of the planner. The rest are photo
+ * folders in every name shape G4 and T11 read. Returns {africa: [{id, name, expect}], asia, R, L2, old}.
+ */
+function seedBig(env) {
+  const r = prng(26200);
+  const pick = a => a[Math.floor(r() * a.length)];
+  const ids = new Set();
+  const nid = () => {
+    let id;
+    do { id = '1' + Array.from({ length: 32 }, () => ALNUM[Math.floor(r() * ALNUM.length)]).join(''); } while (ids.has(id));
+    ids.add(id);
+    return id;
+  };
+  const date = () => { const [y, m] = pick(BIG_MONTHS); return mdy(y, m, 1 + Math.floor(r() * daysIn(y, m))); };
+  const known = BIG_CLUBS.filter(c => c.partners.length === 1), amb = BIG_CLUBS.filter(c => c.partners.length > 1);
+  const off = BIG_CLUBS.filter(c => !c.partners.length).map(c => c.club).concat(['Hidden Valley', 'Quiet Harbor', 'Paper Lanterns']);
+  const roots = [], used = new Set();
+  const push = (name, files, sub, expect) => { roots.push({ name, files, sub: sub || [], expect }); used.add(name); };
+  const fresh = make => { for (;;) { const n = make(); if (!used.has(n)) return n; } };
+  const exClub = onlyPartner(BETA)[0], exName = exClub + ' 11-12-2026';
+  push(ALPHA, 0, [], { code: 'holds-folders' });   // empty, named like a partner the region targets: that partner's folder
+  push(exName, 2, [], { code: 'exists' });
+  push(BETA, 0, [['2026-09', [BETA + ' | ' + exClub + ' | 09-25-2026 | 3']], ['2026-10', []], ['undated', []], ['2026-11', [exName]]],
+       { code: 'holds-folders' });
+  push(GAMMA, 0, [['2026-10', []]], { code: 'holds-folders' });
+  push(GAMMA, 0, [['2026-11', []]], { code: 'holds-folders' });
+  push(DELTA, 0, [['2026-11', []], ['2026-11', []], ['2026-10', []], ['2026-12', []]], { code: 'holds-folders' });
+  push(THETA, 2, [], { code: 'partner-name' });
+  push('Old uploads', 0, [['misc', []]], { code: 'holds-folders' });
+  push(onlyPartner(GAMMA)[0] + ' 10-14-2026', 1, [], { code: 'partner-folders' });
+  push(onlyPartner(DELTA)[0] + ' 11-05-2026', 1, [], { code: 'month-folders' });
+  push(onlyPartner(DELTA)[0] + ' 10-05-2026', 1, [], { path: [DELTA, '2026-10'], reuse: 'both' });
+  push(onlyPartner(THETA)[0] + ' 10-21-2026', 1, [], { code: 'partner-name' });
+  push(onlyPartner(ALPHA)[0] + ' 12-02-2026', 1, [], { path: [ALPHA, '2026-12'], reuse: 'partner' });
+  push(onlyPartner(ETA)[0] + ' 09-16-2026', 1, [], { path: [ETA, '2026-09'], reuse: 'none' });
+  push(onlyPartner(BETA)[1] + ' 10-07-2026', 1, [], { path: [BETA, '2026-10'], reuse: 'both' });
+  push(amb[0].club + ' 10-28-2026', 1, [], { code: 'ambiguous' });
+  push('Quiet Harbor 10-28-2026', 1, [], { code: 'no-partner' });
+  push(onlyPartner(ALPHA)[1] + ' 02-30-2026', 1, [], { code: 'bad-date' });
+  for (let k = 0; k < 3; k++) {
+    const nm = fresh(() => pick(known).club + ' ' + date());
+    push(nm, 1, [], { code: 'duplicate-name' });
+    push(nm, 2, [], { code: 'duplicate-name' });
+  }
+  while (roots.length < BIG_ROOTS) {
+    const kind = r(), wk = String(1 + Math.floor(r() * 30));
+    push(fresh(() => {
+      if (kind < 0.55) return pick(known).club + ' ' + date();
+      if (kind < 0.63) return pick(known).club;
+      if (kind < 0.68) return pick([ALPHA, BETA, DELTA, ETA, ZETA]) + ' | ' + pick(known).club + ' | ' + date() + ' | ' + wk;
+      if (kind < 0.73) return ' | ' + pick(known).club + ' | ' + date() + ' | ' + wk;
+      if (kind < 0.80) {
+        const c = pick(known);
+        return (r() < 0.8 ? c.partners[0] : pick(BIG_PARTNERS)) + ' ' + c.club + ' ' + date() + (r() < 0.7 ? ' ' + wk : '');
+      }
+      if (kind < 0.84) return pick(known).club + ' ' + pick(BIG_BAD);
+      if (kind < 0.92) return pick(off) + ' ' + date();
+      return pick(amb).club + ' ' + date();
+    }), 1 + Math.floor(r() * 3));
+  }
+  for (let i = roots.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [roots[i], roots[j]] = [roots[j], roots[i]]; }
+  let L2 = 0, old = null;
+  const photo = parent => env.add(parent, 'IMG_' + (++bigImg) + '.jpg', false, { size: 1000 + bigImg });
+  for (const x of roots) {
+    x.id = nid();
+    env.add(REGION_IDS.Africa, x.name, true, { id: x.id });
+    if (x.name === 'Old uploads') old = x.id;
+    for (let k = 0; k < x.files; k++) photo(x.id);
+    for (const [sname, kids] of x.sub) {
+      const sid = nid();
+      L2++;
+      env.add(x.id, sname, true, { id: sid });
+      if (sname === 'misc') photo(sid);
+      for (const k of kids) { const kid = nid(); env.add(sid, k, true, { id: kid }); photo(kid); }
+    }
+  }
+  const pg = nid(), pg10 = nid();
+  env.add(REGION_IDS.Asia, GAMMA, true, { id: pg });
+  env.add(pg, '2026-10', true, { id: pg10 });
+  const asia = [{ id: pg, name: GAMMA, expect: { code: 'holds-folders' } },
+                { name: 'Rising Harbor Club 10-23-2026', expect: { path: [GAMMA, '2026-10'], reuse: 'both' } },
+                { name: 'Mountain Path Club', expect: { path: [BETA, 'undated'], reuse: 'none' } },
+                { name: 'Southern Bridge Club 11-20-2026', expect: { path: [DELTA, '2026-11'], reuse: 'none' } },
+                { name: 'Northern Harbor Club 10-30-2026', expect: { code: 'no-partner' } }];
+  for (const x of asia.slice(1)) {
+    x.id = nid();
+    env.add(REGION_IDS.Asia, x.name, true, { id: x.id });
+    photo(x.id);
+  }
+  return { africa: roots, asia, R: roots.length, L2, old };
+}
+
+/** A folder of photos `name` directly in the region folder (a person's, or one the run before did not see). */
+function addRoot(env, region, name) {
+  const id = env.add(REGION_IDS[region], name, true);
+  env.add(id, 'IMG_' + (++bigImg) + '.jpg', false, { size: 11 });
+  return id;
+}
+/** What the mover does between runs: `<Region>/<Partner>/<YYYY-MM>/<sub>/` made where missing, a photo in it. */
+function moverFiles(env, region, partner, month, sub) {
+  let at = REGION_IDS[region];
+  for (const nm of [partner, month]) {
+    const have = env.kids(at).filter(k => k.isFolder && !k.trashed && k.name === nm);
+    at = have.length ? have[0].id : env.add(at, nm, true);
+  }
+  const s = env.add(at, sub, true);
+  env.add(s, 'IMG_' + (++bigImg) + '.jpg', false, { size: 12 });
+}
+/** A `<club> <MM-DD-YYYY>` name in that month no folder directly in the region folder has. */
+function freshRoot(env, region, club, y, m) {
+  const taken = new Set(env.kids(REGION_IDS[region]).map(k => k.name));
+  for (let d = 15; d <= daysIn(y, m); d++) if (!taken.has(club + ' ' + mdy(y, m, d))) return club + ' ' + mdy(y, m, d);
+  throw new Error('freshRoot: no free day');
+}
+
+/** The tree planRefile_ takes for a region folder, read from the fake in one go (what readRefileRegion_ would give). */
+function treeOf(env, regionId) {
+  const live = id => env.kids(id).filter(k => !k.trashed), dirs = id => live(id).filter(k => k.isFolder);
+  return { id: regionId, folders: dirs(regionId).map(a => ({
+    id: a.id, name: a.name, files: live(a.id).filter(k => !k.isFolder).length,
+    folders: dirs(a.id).map(b => ({ id: b.id, name: b.name, files: null,
+                                    folders: dirs(b.id).map(c => ({ id: c.id, name: c.name, files: null, folders: [] })) })) })) };
+}
+/** planRefile_ on the Drive as it now is, read in one go (the planner tests above pin it): {by: id -> entry, refile}. */
+function oracle(env) {
+  const regions = {};
+  for (const reg of Object.keys(REGION_IDS)) regions[reg] = treeOf(env, REGION_IDS[reg]);
+  const got = planOf(regions, BIG_LIST), by = new Map();
+  const { refile, stays } = lists(got.plan);
+  for (const e of refile || []) by.set(e.id, { kind: 'refile', region: e.region, id: e.id, name: e.name, path: Array.from(e.path),
+                                               partnerId: e.partnerId, monthId: e.monthId });
+  for (const s of stays || []) by.set(s.id, { kind: 'stay', region: s.region, id: s.id, name: s.name, code: s.code });
+  return { error: got.error, by, refile: [...by.values()].filter(e => e.kind === 'refile'),
+           stays: [...by.values()].filter(e => e.kind === 'stay') };
+}
+function anchorMisses(o, roots) {
+  return roots.filter(x => x.expect).map(x => {
+    const e = o.by.get(x.id), w = x.expect;
+    const ok = !!e && (w.code ? e.kind === 'stay' && e.code === w.code :
+      e.kind === 'refile' && same(e.path, w.path) &&
+      (w.reuse === 'both' ? !!e.partnerId && !!e.monthId : w.reuse === 'partner' ? !!e.partnerId && e.monthId === null :
+        e.partnerId === null && e.monthId === null));
+    return ok ? null : JSON.stringify(x.name) + ': ' + JSON.stringify(e ? e.code || [e.path, e.partnerId, e.monthId] : 'none') +
+      ' want ' + JSON.stringify(w);
+  }).filter(Boolean);
+}
+
+const LEFT_TO_READ = /(\d+)[^\d\n]{0,40}left to read/i;
+const LEFT_ANY = /(\d+)[^\d\n]{0,40}\bleft\b/i;
+const budgetLines = (lines, region) => lines.filter(l => /TIME_BUDGET/.test(l) && (!region || l.includes(region)));
+/** T15: the n of the run's `TIME_BUDGET ... <region> ... <n> ... left to read` line, null when it has none. */
+function readLeft(lines, region) {
+  const l = budgetLines(lines, region).find(x => LEFT_TO_READ.test(x));
+  return l ? Number(LEFT_TO_READ.exec(l)[1]) : null;
+}
+/** One execution of `entry` on BIG_LIST: its log lines, what it made and moved, the parents it listed, its time. */
+function bigRun(env, entry) {
+  env.state.run++;
+  const c0 = env.creates.length, u0 = env.updates.length, q0 = env.queries.length, t0 = env.clock.now, s0 = env.snapshot();
+  const r = runEntry(env, entry, listSource(BIG_LIST));
+  const run = { n: env.state.run, threw: r.threw, text: r.text, lines: r.text.split('\n'), creates: env.creates.slice(c0),
+                updates: env.updates.slice(u0),
+                listed: new Set([].concat(...env.queries.slice(q0).filter(x => !x.refused).map(x => x.parents))),
+                took: env.clock.now - t0, changed: env.snapshot() !== s0 };
+  run.left = readLeft(run.lines, 'Africa');
+  run.budget = budgetLines(run.lines).length > 0;
+  env.clock.now += 10 * MIN;   // the trigger's interval: the mover may run in between
+  return run;
+}
+const africaMoves = run => run.updates.filter(u => u.args && u.args.removeParents === REGION_IDS.Africa);
+const liveRoots = (env, region) => env.kids(REGION_IDS[region]).filter(k => k.isFolder && !k.trashed);
+const rootNames = env => [].concat(...Object.keys(REGION_IDS).map(reg => liveRoots(env, reg).map(k => k.name.trim())));
+/** The lines that name `name`, less those naming a longer root name that holds it (`River Roots` in `River Roots 10-02-2026`). */
+function linesNaming(lines, name, names) {
+  const longer = names.filter(n => n !== name && n.includes(name));
+  return lines.filter(l => !/TIME_BUDGET/.test(l) && l.includes(name) && !longer.some(n => l.includes(n)));
+}
+/** T5 / T16: the region-root folders of `regions` that no line names with the target (and no stay code) or stay code `o` gives. */
+function planMisses(lines, env, o, regions) {
+  const names = rootNames(env), bad = [];
+  for (const region of regions) {
+    for (const k of liveRoots(env, region)) {
+      const nm = k.name.trim(), e = o.by.get(k.id);
+      if (!e) { bad.push(JSON.stringify(nm) + ': not in the planner\'s plan'); continue; }
+      const want = e.kind === 'refile' ? region + '/' + e.path.join('/') : e.code;
+      const ls = linesNaming(lines, nm, names);
+      const ok = e.kind === 'refile' ? ls.some(l => l.includes(want) && !CODES.some(c => l.includes(c))) : ls.some(l => l.includes(want));
+      if (!ok) bad.push(JSON.stringify(nm) + ' -> ' + want + ' :: ' + (ls[0] || 'no line names it').trim());
+    }
+  }
+  return bad;
+}
+/** T15: the region's folders (named in no other region) a run's lines name with a target path or a stay code. */
+function planLeaks(lines, env, region) {
+  const names = rootNames(env);
+  const elsewhere = new Set([].concat(...Object.keys(REGION_IDS).filter(x => x !== region).map(x => liveRoots(env, x).map(k => k.name.trim()))));
+  return liveRoots(env, region).map(k => k.name.trim()).filter(nm => !elsewhere.has(nm) &&
+    linesNaming(lines, nm, names).some(l => l.includes(region + '/') || CODES.some(c => l.includes(c))));
+}
+function bounds(big, moves) {
+  const W = 2 * big.R + big.L2 + Math.ceil(big.R / BIG_PAGE) + 2, per = Math.ceil(W / (READ_CALLS / 2));
+  return { W, cycle: per + 2, phase1: per + Math.ceil(8 * (moves || 0) / (2 * READ_CALLS)) + 2, quiet: 2 * (per + 2) + 2 };
+}
+const dated = name => /\b\d{2}-\d{2}-\d{4}$/.test(name.trim());
+const showRuns = runs => runs.map(x => 'run ' + x.n + ': ' + (x.threw ? 'threw ' + x.threw.slice(0, 120) :
+  (x.left === null ? '' : x.left + ' left to read; ') + africaMoves(x).length + ' moved' + (x.budget ? '; TIME_BUDGET' : ''))).join(' | ');
+
+console.log('\npreviewRefile — a region bigger than one run\'s read budget: read over several runs, then planned in full (#262: T12-T16)');
+{
+  const env = fakeDrive({ clocked: true, pageCap: BIG_PAGE });
+  const big = seedBig(env);
+  const o0 = oracle(env);
+  const b = bounds(big);
+  check('the fixture: the planner, on the big region read in one go, gives every anchor the outcome the rulings give it',
+        !o0.error && !anchorMisses(o0, big.africa.concat(big.asia)).length,
+        o0.error || anchorMisses(o0, big.africa.concat(big.asia)).slice(0, 4).join(' ;; '));
+  const codes = new Set(o0.stays.filter(s => s.region === 'Africa').map(s => s.code));
+  check('the fixture: ' + big.R + ' folders directly in Africa (' + o0.refile.length + ' to re-file, every stay code among the ' +
+        'rest), ' + big.L2 + ' in those: more than one run reads with ' + READ_CALLS + ' Drive calls; a cycle within ' + b.cycle + ' runs',
+        big.R + big.L2 + 1 > READ_CALLS && CODES.every(c => codes.has(c)) && o0.refile.length > 100,
+        CODES.filter(c => !codes.has(c)).join(', '));
+  const runs = [];
+  let added = null;
+  for (let i = 0; i < b.cycle; i++) {
+    const run = bigRun(env, 'previewRefile');
+    runs.push(run);
+    if (run.n === 1) added = addRoot(env, 'Africa', freshRoot(env, 'Africa', onlyPartner(ALPHA)[2], 2026, 12));
+    if (run.threw || !run.budget) break;
+  }
+  const ran = runs.every(x => !x.threw), last = runs[runs.length - 1];
+  check('no run of the cycle ends in an error', ran, showRuns(runs));
+  check('the first run reads part of Africa: a TIME_BUDGET line names it with the folders left to read (T15)',
+        runs[0].left > 0 && budgetLines(runs[0].lines, 'Africa').length > 0, budgetLines(runs[0].lines).join(' || ') || runs[0].threw);
+  check('repeated runs finish the cycle within ' + b.cycle + ' runs: the last logs no TIME_BUDGET line (T16)',
+        ran && !last.budget, showRuns(runs));
+  const partial = runs.filter(x => x.left !== null);
+  check('until the run that completes Africa\'s read each run says how many folders are left, a number that falls every run (T15)',
+        ran && partial.length > 0 && partial.every((x, i) => x === runs[i] && x.left > 0 && (!i || x.left < partial[i - 1].left)),
+        partial.map(x => x.left).join(' > '));
+  const leaks = partial.map(x => planLeaks(x.lines, env, 'Africa')).filter(l => l.length);
+  check('a run that has not read Africa in full logs none of its plan (T15)', ran && !leaks.length,
+        leaks.length ? leaks[0].slice(0, 3).join(', ') : '');
+  check('a run that does not plan Asia names it in a TIME_BUDGET line (T15)',
+        ran && runs.every(x => x.lines.some(l => l.includes('Asia/')) || budgetLines(x.lines, 'Asia').length > 0),
+        runs.filter(x => !x.lines.some(l => l.includes('Asia/')) && !budgetLines(x.lines, 'Asia').length).map(x => 'run ' + x.n).join(', '));
+  const oEnd = oracle(env), all = [].concat(...runs.map(x => x.lines));
+  const misses = planMisses(all, env, oEnd, ['Africa', 'Asia']);
+  check('the cycle logs every folder of both regions with the planner\'s outcome on the Drive read in one go: ' +
+        oEnd.refile.length + ' re-filed (same target), ' + oEnd.stays.length + ' stay (same code) (T16; DoD: outcomes unchanged)',
+        ran && !last.budget && !misses.length, misses.length + ' missed; ' + misses.slice(0, 4).join(' ;; '));
+  const addedName = added && env.items.get(added).name;
+  check('a folder that appeared after the first run is in the plan: ' + JSON.stringify(addedName) + ' -> Africa/' + ALPHA + '/2026-12',
+        !!added && linesNaming(all, addedName, rootNames(env)).some(l => l.includes('Africa/' + ALPHA + '/2026-12')), '');
+  check('no run made, moved, renamed or trashed anything (G8)',
+        ran && !env.creates.length && !env.updates.length && !env.banned.length && !runs.some(x => x.changed),
+        env.creates.length + ' create(s), ' + env.updates.length + ' update(s); ' + env.banned.join(', '));
+  checkQueries('the preview cycle', env, ran && runs.length > 1);
+  check('the logs name no photo; no run passes Apps Script\'s 6 minutes on the fake clock (T13)',
+        ran && runs.every(x => noFileNames(x.text) && x.took <= 6 * MIN), runs.map(x => Math.round(x.took / 1000) + 's').join(', '));
+  check('when the cycle ends the re-filing keeps under 2 KB in the Script Properties, the config unchanged (T14, T16)',
+        ran && !last.budget && env.configIntact() && env.ownStoreBytes() < 2048, env.ownStoreBytes() + ' bytes kept');
+
+  // after the cycle: one folder renamed, one trashed, one added; the next cycle reads the Drive as it now is (T16)
+  const oneName = e => liveRoots(env, 'Africa').filter(k => k.name === e.name).length === 1;
+  const picks = oEnd.refile.filter(e => e.region === 'Africa' && e.id !== added && dated(e.name) && oneName(e) && e.path[0] !== BETA);
+  const ren = picks[0], gone = picks[1];
+  const oldName = ren.name, newName = freshRoot(env, 'Africa', onlyPartner(BETA)[2], 2027, 1);
+  env.items.get(ren.id).name = newName;
+  env.items.get(gone.id).trashed = true;
+  for (const k of env.kids(gone.id)) k.trashed = true;
+  const added2 = addRoot(env, 'Africa', freshRoot(env, 'Africa', onlyPartner(ETA)[1], 2026, 12));
+  const runs2 = [];
+  for (let i = 0; i < b.cycle; i++) {
+    const run = bigRun(env, 'previewRefile');
+    runs2.push(run);
+    if (run.threw || !run.budget) break;
+  }
+  const ran2 = runs2.every(x => !x.threw), last2 = runs2[runs2.length - 1], all2 = [].concat(...runs2.map(x => x.lines));
+  check('the run after a complete cycle reads Africa again (nothing planned from the last cycle\'s read): TIME_BUDGET, n left (T16)',
+        ran2 && runs2[0].left > 0, showRuns(runs2.slice(0, 2)));
+  const misses2 = planMisses(all2, env, oracle(env), ['Africa', 'Asia']);
+  check('the next cycle finishes within ' + b.cycle + ' runs and plans the Drive as it now is: the renamed folder by its new ' +
+        'name, the added one, every other as the planner says (T16)',
+        ran2 && !last2.budget && !misses2.length, (last2.budget ? 'not finished; ' : '') + misses2.slice(0, 4).join(' ;; '));
+  const names2 = rootNames(env).concat([oldName, gone.name]);
+  check('the next cycle names neither the renamed folder\'s old name nor the trashed folder',
+        ran2 && !linesNaming(all2, oldName, names2).length && !linesNaming(all2, gone.name, names2).length,
+        linesNaming(all2, oldName, names2).concat(linesNaming(all2, gone.name, names2)).slice(0, 2).join(' || '));
+  check('the next cycle plans the folder added after the last: ' + JSON.stringify(env.items.get(added2).name),
+        linesNaming(all2, env.items.get(added2).name, rootNames(env)).some(l => l.includes('Africa/' + ETA + '/2026-12')), '');
+  check('and again keeps under 2 KB when it ends, makes and moves nothing',
+        ran2 && env.configIntact() && env.ownStoreBytes() < 2048 && !env.creates.length && !env.updates.length,
+        env.ownStoreBytes() + ' bytes kept');
+}
+
+console.log('\nrefileExisting — the big region re-filed over repeated runs; what the mover adds between runs used, not doubled (#262: T15-T17)');
+{
+  const env = fakeDrive({ clocked: true, pageCap: BIG_PAGE });
+  const big = seedBig(env);
+  const o0 = oracle(env);
+  const b = bounds(big, o0.refile.length);
+  const runs = [], wrong = [], monthsAdded = [];
+  const hand = { trash: null, rename: null, moved: null, newName: '', new1: null, new2: null };
+  const isHand = id => id === hand.trash || id === hand.rename || id === hand.moved;
+  const inPlace = e => same(env.where(e.id), [e.region].concat(e.path));
+  const nameOf = id => (env.items.get(id) || {}).name;
+  let firstMove = 0;
+  /** T17: a move must be one planRefile_ makes on the Drive as it was when the run started. */
+  const movesOff = (run, oStart) => run.updates.filter(u => u.args && u.args.removeParents).map(u => {
+    const e = oStart.by.get(u.fileId);
+    if (!e || e.kind !== 'refile') {
+      return 'run ' + run.n + ' moved ' + JSON.stringify(nameOf(u.fileId)) + ', which the plan of the Drive then ' +
+        (e ? 'holds (' + e.code + ')' : 'does not have');
+    }
+    return inPlace(e) ? null : 'run ' + run.n + ' moved ' + JSON.stringify(e.name) + ' to ' + env.where(u.fileId).join('/') + ', not ' +
+      [e.region].concat(e.path).join('/');
+  }).filter(Boolean);
+  const between = run => {
+    if (run.n === 1) {   // a folder the first run read trashed, one renamed, one moved by hand (T17)
+      const once = e => liveRoots(env, 'Africa').filter(k => k.name === e.name).length === 1;
+      const read1 = o0.refile.filter(e => e.region === 'Africa' && run.listed.has(e.id) && dated(e.name) && once(e) && e.path[0] !== BETA);
+      const any = o0.refile.filter(e => e.region === 'Africa' && dated(e.name) && once(e) && e.path[0] !== BETA);
+      const three = read1.length >= 3 ? read1 : any;
+      [hand.trash, hand.rename, hand.moved] = three.slice(0, 3).map(e => e.id);
+      hand.readFirst = read1.length >= 3;
+      env.items.get(hand.trash).trashed = true;
+      for (const k of env.kids(hand.trash)) k.trashed = true;
+      hand.newName = freshRoot(env, 'Africa', onlyPartner(BETA)[2], 2027, 1);
+      env.items.get(hand.rename).name = hand.newName;
+      env.items.get(hand.moved).parent = big.old;
+    }
+    if (run.n === 2) {   // the mover files a submission of a partner with no folder yet; a person adds a folder
+      moverFiles(env, 'Africa', ETA, '2026-11', ETA + ' | Hidden Valley | 11-24-2026 | 4');   // an off-list club: no name clash
+      hand.new1 = addRoot(env, 'Africa', freshRoot(env, 'Africa', onlyPartner(ALPHA)[2], 2026, 12));
+    }
+    if (!firstMove && africaMoves(run).length) {   // a folder added once the moves have begun
+      firstMove = run.n;
+      hand.new2 = addRoot(env, 'Africa', freshRoot(env, 'Africa', onlyPartner(ALPHA)[3], 2027, 1));
+    }
+    if (monthsAdded.length < 4) {   // the mover makes a month folder a planned folder waits for, its partner folder read before
+      const want = o0.refile.filter(e => e.region === 'Africa' && !isHand(e.id) && !inPlace(e) && e.path[1] !== 'undated' &&
+        env.foldersAt(['Africa', e.path[0]]).length === 1 && !env.foldersAt(['Africa'].concat(e.path)).length);
+      const staleOf = e => runs.some(x => x.listed.has(env.foldersAt(['Africa', e.path[0]])[0]));
+      const e = want.filter(staleOf)[0] || want[0];
+      if (e) {
+        monthsAdded.push({ path: e.path, stale: staleOf(e) });
+        moverFiles(env, 'Africa', e.path[0], e.path[1], e.path[0] + ' | Hidden Valley | ' + e.path[1].slice(5) + '-20-' +
+                   e.path[1].slice(0, 4) + ' | 2');
+      }
+    }
+  };
+  const step = () => {
+    const oStart = oracle(env);
+    const run = bigRun(env, 'refileExisting');
+    runs.push(run);
+    wrong.push(...movesOff(run, oStart));
+    run.movesLeft = run.left === null && o0.refile.some(e => e.region === 'Africa' && !isHand(e.id) && !inPlace(e));
+    between(run);
+    return run;
+  };
+  const firstPlan = () => o0.refile.filter(e => !isHand(e.id));
+  let phase1 = 0, quiet = 0;
+  for (let i = 0; i < b.phase1 && !phase1; i++) {
+    const run = step();
+    if (run.threw) break;
+    if (firstPlan().every(inPlace)) phase1 = run.n;
+  }
+  for (let i = 0; phase1 && i < b.quiet && !quiet; i++) {
+    const run = step();
+    if (run.threw) break;
+    if (!run.budget && !run.updates.length && !run.creates.length) quiet = run.n;
+  }
+  const ran = runs.length > 0 && runs.every(x => !x.threw && !/REFILE_FAILED/.test(x.text));
+  check('no run ends in an error or logs REFILE_FAILED', ran, showRuns(runs.filter(x => x.threw || /REFILE_FAILED/.test(x.text)).slice(0, 3)) ||
+        showRuns(runs.slice(0, 3)));
+  check('the first run reads part of Africa (TIME_BUDGET, n left to read) and moves none of its folders (T15, T17)',
+        runs[0].left > 0 && !africaMoves(runs[0]).length, showRuns(runs.slice(0, 1)));
+  const k1 = runs.findIndex(x => x.left === null);
+  check('no Africa folder moves before the run that completes its read; until then n falls every run (T15, T17)',
+        k1 > 0 && runs.slice(0, k1).every((x, i) => !africaMoves(x).length && x.left > 0 && (!i || x.left < runs[i - 1].left)),
+        showRuns(runs.slice(0, k1 < 0 ? runs.length : k1 + 1)));
+  check('every folder of the first plan (' + firstPlan().length + ') is in its target within ' + b.phase1 + ' runs: the moves a run ' +
+        'leaves are made by the next runs, without the region read again first (T17)',
+        ran && phase1 > 0, (phase1 ? 'run ' + phase1 : firstPlan().filter(e => !inPlace(e)).length + ' not in place') + '; ' + showRuns(runs));
+  const leaving = runs.filter(x => k1 >= 0 && x.n >= runs[k1].n && phase1 && x.n < phase1);
+  const says = x => x.budget && (!x.movesLeft || budgetLines(x.lines).some(l => LEFT_ANY.test(l)));
+  check('each run that leaves work for the next logs TIME_BUDGET; one that leaves moves says how many are left (T17)',
+        ran && phase1 > 0 && leaving.every(says), leaving.filter(x => !says(x)).map(x => 'run ' + x.n).join(', '));
+  check('every move is one planRefile_ makes on the Drive as it was at the start of that run: none from a part of a region (T17)',
+        ran && !wrong.length && env.updates.length > 0, wrong.slice(0, 3).join(' ;; '));
+  check('then a quiet run (no TIME_BUDGET, nothing moved or made) within ' + b.quiet + ' more runs', ran && quiet > 0,
+        quiet ? 'run ' + quiet : showRuns(runs.slice(-4)));
+  const off = firstPlan().filter(e => !inPlace(e) || nameOf(e.id) !== e.name || env.items.get(e.id).trashed);
+  check('the first plan\'s folders are each in <Region>/<Partner>/<Month>, id and name kept', ran && !off.length,
+        off.slice(0, 3).map(e => JSON.stringify(e.name) + ' in ' + env.where(e.id).join('/')).join(', '));
+  const moved = o0.stays.filter(s => !same(env.where(s.id), [s.region]) || nameOf(s.id) !== s.name);
+  check('every folder the first plan holds is still directly in its region folder, as it was', ran && !moved.length,
+        moved.slice(0, 3).map(s => JSON.stringify(s.name) + ' in ' + env.where(s.id).join('/')).join(', '));
+  check('three folders the first run had read were changed by hand before the second (the fixture: T17\'s case)', !!hand.readFirst, '');
+  const touched = id => env.updates.some(u => u.fileId === id);
+  check('the folder trashed since its read: never moved, still in the trash, in the region folder', ran && quiet > 0 &&
+        env.items.get(hand.trash).trashed && same(env.where(hand.trash), ['Africa']) && !touched(hand.trash), env.where(hand.trash).join('/'));
+  check('the folder moved by hand since its read: still where it was put', ran && quiet > 0 &&
+        same(env.where(hand.moved), ['Africa', 'Old uploads']) && !touched(hand.moved), env.where(hand.moved).join('/'));
+  check('the folder renamed since its read: re-filed by its new name ' + JSON.stringify(hand.newName) + ' to Africa/' + BETA + '/2027-01',
+        same(env.where(hand.rename), ['Africa', BETA, '2027-01']) && nameOf(hand.rename) === hand.newName, env.where(hand.rename).join('/'));
+  check('folders that appeared between runs are re-filed: Africa/' + ALPHA + '/2026-12 and /2027-01',
+        !!hand.new1 && !!hand.new2 && same(env.where(hand.new1), ['Africa', ALPHA, '2026-12']) &&
+        same(env.where(hand.new2), ['Africa', ALPHA, '2027-01']),
+        JSON.stringify([hand.new1 && env.where(hand.new1), hand.new2 && env.where(hand.new2)]));
+  const chains = new Set();
+  for (const e of firstPlan()) { chains.add(JSON.stringify([e.region, e.path[0]])); chains.add(JSON.stringify([e.region].concat(e.path))); }
+  for (const c of [['Africa', ETA], ['Africa', ETA, '2026-11'], ['Africa', BETA, '2027-01'], ['Africa', ALPHA, '2027-01']]) {
+    chains.add(JSON.stringify(c));
+  }
+  const doubled = [...chains].map(c => JSON.parse(c)).filter(c => env.foldersAt(c).length !== 1);
+  check('each partner and month folder is there once (' + chains.size + '): the mover\'s partner folder for ' + ETA +
+        ' and its month folders used, never a second made (T17)', ran && !doubled.length,
+        doubled.slice(0, 4).map(c => c.join('/') + ': ' + env.foldersAt(c).length).join('; '));
+  const stale = monthsAdded.filter(x => x.stale);
+  check('the month folders the mover made between runs (' + monthsAdded.length + ', ' + stale.length + ' after the re-filing had read ' +
+        'their partner folder) are used: each there once, holding the folders planned for it',
+        monthsAdded.length >= 3 && stale.length > 0 && monthsAdded.every(x => env.foldersAt(['Africa'].concat(x.path)).length === 1),
+        monthsAdded.map(x => x.path.join('/') + (x.stale ? ' (stale)' : '') + ': ' + env.foldersAt(['Africa'].concat(x.path)).length).join('; '));
+  const madeTwice = env.creates.map(c => JSON.stringify([c.resource.parents, c.resource.name]))
+    .filter((k, i, a) => a.indexOf(k) !== i);
+  check('no partner or month folder made twice in all the runs', ran && !madeTwice.length, madeTwice.slice(0, 3).join(', '));
+  const badUpdate = env.updates.filter(u => Object.keys(u.resource).length || u.args.supportsAllDrives !== true ||
+    (u.args.removeParents !== REGION_IDS.Africa && u.args.removeParents !== REGION_IDS.Asia));
+  check('each move: resource {}, removeParents its region folder, supportsAllDrives (G7, T10)', ran && !badUpdate.length,
+        JSON.stringify(badUpdate.slice(0, 2)));
+  checkQueries('the real runs', env, ran);
+  check('the logs name no photo; no run passes Apps Script\'s 6 minutes on the fake clock (T13)',
+        ran && runs.every(x => noFileNames(x.text) && x.took <= 6 * MIN), runs.map(x => Math.round(x.took / 1000) + 's').join(', '));
+  check('the quiet run leaves under 2 KB in the Script Properties, the config unchanged, no refused call (T14, T16)',
+        ran && quiet > 0 && env.configIntact() && env.ownStoreBytes() < 2048 && !env.banned.length,
+        env.ownStoreBytes() + ' bytes kept; ' + env.banned.join(', '));
+
+  // a new cycle after the quiet run: nothing left to move
+  const made = env.creates.length, movedN = env.updates.length, snap = env.snapshot(), more = [];
+  for (let i = 0; quiet && i < b.cycle; i++) {
+    const run = bigRun(env, 'refileExisting');
+    more.push(run);
+    if (run.threw || !run.budget) break;
+  }
+  check('a new cycle after it ends within ' + b.cycle + ' runs, moving and making nothing; the Drive as it was',
+        quiet > 0 && more.length > 0 && more.every(x => !x.threw) && !more[more.length - 1].budget && env.creates.length === made &&
+        env.updates.length === movedN && env.snapshot() === snap, showRuns(more));
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });

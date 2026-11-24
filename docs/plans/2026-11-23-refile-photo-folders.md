@@ -50,8 +50,9 @@ unchanged (no new scope, no new service):
   the repository outside `data/`: the file holds the real club names.
 - **`drive-sync/Refile.gs`**: `previewRefile` (the dry run) and `refileExisting` (the real run),
   one read and one plan (`planRefile_`, pure, tested offline) for both. It reads each region
-  folder (`TARGET_FOLDER_<KEY>`) by listing, three levels deep, folder names only (no file's name
-  is asked for), under the mover's script lock and time budget.
+  folder (`TARGET_FOLDER_<KEY>`) by listing, one folder per Drive call (#262, below), three
+  levels deep, folder names only (no file's name is asked for), under the mover's script lock
+  and time budget; a big region over several runs, its progress kept in the Script Properties.
 - **The docs:** this plan, `drive-sync/README.md` ("Re-filing the existing folders"), RUNBOOK
   "Photo mover", DECISIONS 2026-11-23.
 
@@ -85,23 +86,49 @@ with its code and reason:
 | `partner-folders` / `month-folders` | two or more partner (or month) folders of that name |
 | `exists` | a folder of its name is already in that month folder |
 | `no-partner` / `ambiguous` / `bad-date` | above |
+| `unread` | (#262) Drive failed three times in the cycle to list it, or the partner or month folder it was planned into; the next cycle tries again |
 
 The real run moves each folder itself, whole, by one `Drive.Files.update` within the Shared Drive
 (`addParents` the month folder, `removeParents` the region folder): its id, name and photos stay
-as they are. A missing partner or month folder is made by `Drive.Files.create`, once per run.
+as they are. A missing partner or month folder is looked up by name first (the mover may have
+made it since the read) and made by `Drive.Files.create` only when there is none, once per run.
 Just before each move the folder is read by id (still a live folder of its name directly in the
 region folder, or it is skipped: `moved or trashed (or renamed) since the read`, no error); after
 it, read back (`REFILE_FAILED` unless it is in the month folder). The time budget is checked
 before each folder, never between making its partner and month folders and its move; what it
-does not reach waits for the next run, and a re-run after a complete run moves nothing. Never a
+does not reach waits for the next run (from the same plan), and a cycle after a complete one
+moves nothing. Never a
 configured folder, the Shared Drive's root or anything in the trash; nothing renamed, trashed,
 shared, copied or deleted.
 
 The log, per region: `<Region>: [would ]refile N, stays M (<code> n, …)`, then one line per folder
 directly in the region folder by name, `[would ]refile "<name>" to <Region>/<Partner>/<YYYY-MM |
 undated>` or `stays "<name>": <code>: <reason>`; after the real run `done: N folder(s) moved, M
-partner or month folder(s) made, K skipped (moved or trashed since the read), F failure(s)`.
+partner or month folder(s) made, K skipped (moved or trashed since the read), F failure(s)`; per
+region left for later `TIME_BUDGET: <Region>: <n> folder(s) left to read` (or `left to move`),
+and `cycle complete` when nothing is left.
 Folder names (club, partner, date) and counts only, never a file's name.
+
+## The dry run refused for shared drive membership (2026-11-24, #262)
+
+- **What happened:** with the code of #237 and `RefileList` (384 clubs) pasted and the trigger
+  installed, `previewRefile` stopped in the first region with `GoogleJsonResponseException: API
+  call to drive.files.list failed with error: The attempted action requires shared drive
+  membership.` (`listSharedDrive_` ← `readRefileRegion_`). Nothing was read in full, planned or
+  moved.
+- **Why:** the account that runs the mover reaches the region folders through folder sharing and
+  is not a member of the Shared Drive. Its first listing, `'<region>' in parents` (one folder),
+  succeeded; the next one named up to 20 folders joined with `or`, and Drive answers a query
+  that names more than one folder only to a member of the drive.
+- **The fix (Ryan, 2026-11-24: read folder by folder, a slower run is fine, the account is not
+  added to the drive):** every listing names one folder, `'<id>' in parents` ANDed with
+  `trashed` / `mimeType` / `name` terms only, with `corpora` and `driveId` as the listing that
+  succeeded sent them. That is one Drive call per folder, so a big region takes several runs: the
+  re-filing keeps what a run read (and, for `refileExisting`, the plan's moves left) in the
+  Script Properties (`REFILE_STATE_PREVIEW_*`, `REFILE_STATE_APPLY_*`; deleted at the end, no
+  other property touched) and the next run carries on. The plan of a region read in full is the
+  same as before (same targets, same stay codes); each region's plan is logged by the run that
+  completes its read, and moves are made only from such a plan.
 
 ## Rollout (live; every step on Ryan's go)
 
@@ -119,19 +146,29 @@ steps 2-4: the live project's `Plan.gs` and `Mover.gs` are #225's).
    script files, `Refile` (the repo's `drive-sync/Refile.gs`, whole) and `RefileList`
    (`data/RefileList.gs`, whole); save; `installTrigger`. The manifest is unchanged (no new scope,
    no new service). The script lock keeps the mover's runs and the re-filing apart.
-4. **The dry run:** `previewRefile`. Executions → its log: per region the counts, then every
-   folder directly in the region folder with its target or its code and reason. Nothing changes.
+4. **The dry run:** `previewRefile`, **repeated until it reports every region read**: a run that
+   has not read a region in full logs `TIME_BUDGET: <Region>: <n> folder(s) left to read, about
+   <k> more run(s) at this run's pace` (n falls every run; `not read this run` for a region
+   waiting its turn); the run that reads a region's last folders logs its plan, per region the
+   counts, then every folder directly in the region folder with its target or its code and
+   reason. Run it again until a run logs `cycle complete` and no `TIME_BUDGET` line. The plan is
+   spread over those runs' logs (Executions, each run's log). Nothing changes.
 5. **Ryan reviews the dry run** (the Definition of done): the targets look right, and each
    folder that stays has a reason he accepts. A club renamed since its folders were made
    (`no-partner`): a row in an `--extra` CSV (`region,partner,club`), step 2 again with `--extra`,
-   and only `RefileList` replaced in the project, then step 4 again. `ambiguous`, `bad-date` and
-   the holds are moved by hand or left, as Ryan decides. The counts (no names) go in the Result.
-6. **The real run:** `refileExisting`. Its log repeats the plan without `would`, then `done: …, 0
-   failure(s)`. Run it again until a region line reads `refile 0` everywhere (a `TIME_BUDGET`
-   line means the run stopped in time; the next one carries on).
-7. **The read-back:** `previewRefile` again: `would refile 0` in every region, the stays as
-   reviewed. On the Shared Drive, a few re-filed folders opened under
-   `<Region>/<Partner>/<YYYY-MM>` and `undated`, their photos inside.
+   and only `RefileList` replaced in the project, then step 4 again (a changed `RefileList` drops
+   what the runs kept: the read starts again). `ambiguous`, `bad-date` and the holds are moved by
+   hand or left, as Ryan decides. The counts (no names) go in the Result.
+6. **The real run:** `refileExisting`, **repeated**: first as in step 4 (`TIME_BUDGET … left to
+   read`, nothing moved); the run that completes a region's read logs its plan without `would`
+   and starts its moves; the runs after it go on with them (`TIME_BUDGET: <Region>: <n>
+   folder(s) left to move`) without reading that region again; each run ends `done: N folder(s)
+   moved, …, 0 failure(s)`. Run it again until a run logs `cycle complete` and no `TIME_BUDGET`
+   line; then go on running it (a new cycle reads again, and re-files what appeared or was
+   renamed meanwhile) until such a run **moves nothing and reports no `TIME_BUDGET`**.
+7. **The read-back:** `previewRefile` again, repeated as in step 4 until `cycle complete`:
+   `would refile 0` in every region, the stays as reviewed. On the Shared Drive, a few re-filed
+   folders opened under `<Region>/<Partner>/<YYYY-MM>` and `undated`, their photos inside.
 8. **The clean-up:** delete the `RefileList` and `Refile` script files from the live project
    (Ryan); the trigger keeps running `moveSettledPhotos`. Delete `data/RefileList.gs`.
 9. **The Result** below: the dates (UTC), the counts per region (re-filed, stays per code),
@@ -155,11 +192,17 @@ steps 2-4: the live project's `Plan.gs` and `Mover.gs` are #225's).
   every target before anything moves (step 5); a wrong one is moved back by hand (Rollback).
 - **Clubs renamed since their folders were made** are `no-partner` and stay: `--extra` places
   them (step 5).
-- **A large region not read in time:** past half the run's budget a region not read in full is
-  not planned (`TIME_BUDGET`); the read lists folders in batches, so this is not expected. Run
-  the entry point again.
+- **A large region:** one Drive call per folder (#262), so a region of thousands of folders
+  takes several runs (`TIME_BUDGET … left to read`, with the runs left); a region is planned only
+  once read in full, and moved only from that plan. What the runs keep is about 40 bytes per
+  folder read and 60 per planned move, of the Script Properties' 500 KB (shared by a dry-run and
+  a real-run cycle under way at once): some thousands of folders fit. A folder Drive will not
+  list is `REFILE_FAILED` (the run ends with an error, the next tries again); at the third
+  failure in a cycle it stays where it is (`unread`), and so does every folder planned into it.
 - **The mover's own trigger** runs between the re-filing's runs: one script lock; both find the
-  partner and month folders by name and make a missing one, so neither makes a second.
+  partner and month folders by name and make a missing one, so neither makes a second (a
+  partner or month folder the plan found is re-read before a move into it; one the mover made
+  since the read is found by name before any is made).
 - **A run cut short** after making a partner folder and before its move leaves an empty partner
   folder: the next run reuses it (`holds-folders`), it never holds that partner's folders.
 - **Privacy:** `RefileList.gs` holds the real club and partner names: `data/` only, never
@@ -178,3 +221,7 @@ refile_list_test` (from `test/`), `harness-red run`; `node test/drive_sync_test.
 ## Result
 
 <!-- To fill: each live step with its date (UTC) and counts (no names), `Live:` -->
+
+- 2026-11-24: step 3 done (the push of #237 and `RefileList`, 384 clubs; trigger installed).
+  Step 4 stopped in the first region, nothing moved: the membership error above; fixed by #262,
+  then step 3's push again and step 4 repeated.

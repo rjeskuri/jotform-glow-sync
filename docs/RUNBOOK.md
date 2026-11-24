@@ -1515,8 +1515,10 @@ mover filed before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/`, or
 the Roster and Partners exports, `tools/refile_list.py` (it writes `RefileList.gs`, the club →
 partner list), `removeTrigger`, the paste of `drive-sync/Refile.gs` and that file into the
 project, `installTrigger`, `previewRefile` (the dry run: every folder directly in a region folder
-with its target, or its code and reason for staying), **Ryan reviews that log**, then
-`refileExisting` until it moves nothing, `previewRefile` again (`would refile 0`), and both files
+with its target, or its code and reason for staying; it reads one folder per Drive call, #262, so
+run it again until a run logs `cycle complete`, each `TIME_BUDGET` line saying what is left),
+**Ryan reviews that log**, then `refileExisting` likewise until a run moves nothing and logs no
+`TIME_BUDGET`, `previewRefile` again (`would refile 0`), and both files
 deleted from the project. A folder whose partner is not found stays where it is, listed with the
 reason. Undo: move a folder back into the region folder by hand (nothing is renamed or deleted).
 `REFILE_FAILED <Region> "<name>"`: Drive refused the move, or its read-back does not show the
