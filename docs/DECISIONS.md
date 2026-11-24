@@ -988,3 +988,15 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Until Ryan pushes the script and runs `installTriggers` once, the menu is still the only way. After that the window is up to an hour, during which the Club Roster Form can still offer a retired club; the menu closes it at once.
   - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
   - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".
+
+### 2026-11-23 — The photo folders already on the Shared Drive are re-filed once, from a club → partner list (#237)
+
+- The club folders the mover filed directly in the region folders before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/` by `drive-sync/Refile.gs` (`previewRefile`, then `refileExisting`), each folder moved whole, keeping its name and photos.
+- **Partner source, option A** (Ryan, 2026-11-23, ticket #237): a repo tool, `tools/refile_list.py`, reads the sheet's Roster and Partners exports once and produces the club → partner list (`RefileList.gs`, `REFILE_LIST`); the mover uses that list for this one-time re-filing only, and both files are deleted from the live project afterwards. The mover does not read the sheet, and no new OAuth scope is added to the mover project.
+- **Folders with no date** (made before 2026-10-30, named by club only) go to `<Region>/<Partner>/undated/` (Ryan, the same day).
+- **A club whose partner is not found stays where it is** and is listed in the dry run with the reason; so does every folder the plan cannot place unambiguously (two partners for its club, a date that is not a real one, two folders of one name, two partner or month folders of one name, a folder of its name already in the month folder).
+- **Why:** staff asked for the existing club folders to be grouped like the new ones (#225); their names carry no partner, and the mover does not read the sheet.
+- **Consequences:**
+  - The existing folders keep their names: no renaming of old folders or files, and no follow-up ticket for it (Ryan, 2026-11-23).
+  - Ryan reviews `previewRefile`'s log before the real run; what stays is moved by hand or left.
+  - Plan: `docs/plans/2026-11-23-refile-photo-folders.md` (Rollout, Rollback, Result).

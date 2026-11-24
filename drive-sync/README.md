@@ -36,7 +36,19 @@ What it does and never does:
   in one (in the trash through its folder only) moves like any other, out of the trash in the
   same update; a photo a person trashed is left alone. So: to discard a photo in My Drive, trash
   the photo itself, not only its subfolder;
-- two or more folders of that name on the Shared Drive: refused and logged, moved by hand;
+- where (#225, [plan](../docs/plans/2026-11-19-photo-folders-partner-month.md)): a subfolder
+  named `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (the week blank or left out for a
+  special event; each form's Drive integration names it) goes in `<Partner>/<YYYY-MM>/` under
+  the region folder, the month from its session date (`Plan.gs` `photoPath_`); any other name
+  (`<Club Name> <MM-DD-YYYY>`, the club alone, a blank partner, a date that is not a real date)
+  directly in the region folder, as before. The partner and month folders are found by name
+  (one in the trash does not count) and reused, or made by the real run when missing
+  (`Drive.Files.create`, `supportsAllDrives`); two of one name at a level: that subfolder is
+  refused and logged, nothing of it moves. The dry run makes nothing and logs the target path
+  (`would move "<name>" to <Region>/<Partner>/<YYYY-MM>`). A same-name folder counts only at the
+  subfolder's own path (a merge, a refusal). Nothing is ever renamed;
+- two or more folders of that name at its path on the Shared Drive: refused and logged, moved by
+  hand;
 - the `Attendance photos - <Region>` folders themselves stay: Jotform writes into them;
 - retention (#185, only with `RETENTION_DAYS` set, only on the real run, after the moves): every
   photo under a region folder on the Shared Drive, at any depth (directly in the region folder,
@@ -59,8 +71,8 @@ What it does and never does:
   anything for good (no permanent delete, no emptied trash). The photos show girls' faces; only
   the Shared Drive's members see them;
 - the log (Executions) holds counts and folder names, never a file's name or contents; for
-  retention only the names of the region folders' direct subfolders (the club subfolders), with
-  everything deeper counted under them:
+  retention only the names of the region folders' direct subfolders (the club subfolders filed
+  there, and the partner folders of #225), with everything deeper counted under them:
 
   | Line | Means |
   | --- | --- |
@@ -74,9 +86,12 @@ What it does and never does:
   | `TRASH_REFUSED <Region>: …` | the plan named a region folder, the root, or something not below its region folder: nothing trashed that run, an error (a bug: stop and look) |
   | `RETENTION_FAILED <step>: <error>` | a retention read failed: nothing previewed or trashed, an error after the moves |
 
-Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js`), `Mover.gs` (the entry
-points), `appsscript.json` (time zone America/New_York, the sheet's; the two scopes; the advanced
-Drive service `Drive`, v3), `.clasp.json.example` (the clasp link template), `.claspignore`.
+Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js` and, for the partner and
+month layout, `test/drive_sync_layout_test.js`), `Mover.gs` (the entry
+points), `Refile.gs` (the one-time re-filing of the folders already on the Shared Drive, below;
+tested by `test/drive_sync_refile_test.js`), `appsscript.json` (time zone America/New_York, the
+sheet's; the two scopes; the advanced Drive service `Drive`, v3), `.clasp.json.example` (the
+clasp link template), `.claspignore`.
 
 ## Setup (once, Ryan)
 
@@ -166,3 +181,39 @@ good and nothing brings it back. Within those 30 days a Content manager of the S
 restores it: the Shared Drive → Trash → the item → Restore. Restore a trashed folder first, then
 anything from it still in the trash, and see each back in place (where a restored item goes when
 its folder is in the trash too is unverified: the retention plan's Context, c, and Rollback).
+
+## Re-filing the existing folders (once, #237)
+
+The folders the mover filed before #225 sit directly in the region folders, named `<Club Name>
+<MM-DD-YYYY>` (since 2026-10-30) or the club alone, with no partner. `Refile.gs` moves each of
+them once under `<Region>/<Partner>/<YYYY-MM>/`, or `<Region>/<Partner>/undated/` when its name
+has no date: plan and procedure [docs/plans/2026-11-23-refile-photo-folders.md](../docs/plans/2026-11-23-refile-photo-folders.md).
+
+- `previewRefile`: the dry run. Reads the region folders (`TARGET_FOLDER_<KEY>`; a region
+  without it is skipped), logs per region `would refile N, stays M (<code> n, …)` and one line
+  per folder directly in the region folder, with its target or its code and reason. Changes
+  nothing.
+- `refileExisting`: the same read and plan, carried out. Each folder moves whole, by one
+  `Drive.Files.update` within the Shared Drive, keeping its id, name and photos; a missing
+  partner or month folder is looked up by name (the mover may have made it) and made only when
+  there is none (`Drive.Files.create`, once per run). Re-checked by id just before (skipped, no
+  error, when moved, trashed or renamed since the read) and read back after (`REFILE_FAILED`).
+
+The read lists one folder per Drive call (`'<id>' in parents`, #262): the mover's account
+reaches the region folders through folder sharing, is no member of the Shared Drive, and Drive
+refuses it a listing that names several folders ("The attempted action requires shared drive
+membership."). So a big region takes several runs: each run reads on from where the last
+stopped and logs `TIME_BUDGET: <Region>: <n> folder(s) left to read, about <k> more run(s)`;
+the run that completes a region's read logs its plan, and the real run then moves its folders,
+`TIME_BUDGET: <Region>: <n> folder(s) left to move` until they are done. Run the entry point
+again until a run logs `cycle complete` (no `TIME_BUDGET` line); for `refileExisting`, then
+again until such a run also moves nothing (`done: 0 folder(s) moved`). The progress is kept in
+the Script Properties as `REFILE_STATE_PREVIEW_*` and `REFILE_STATE_APPLY_*` (the dry run's and
+the real run's apart; deleted at a cycle's end, no other property touched): leave them alone; a
+changed `RefileList` drops them by itself and the read starts again.
+
+The partner comes from `REFILE_LIST`, which `tools/refile_list.py` writes once as `RefileList.gs`
+from the Roster and Partners exports. Both files are pasted into the project for the re-filing
+only and deleted afterwards; the mover reads no sheet, and the manifest is unchanged (no new
+scope, no new service). Without a well-formed `REFILE_LIST` both entry points refuse before any
+Drive call. They take the mover's script lock and keep to its time budget.
