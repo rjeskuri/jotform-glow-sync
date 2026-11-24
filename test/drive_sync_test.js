@@ -5119,8 +5119,8 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
           const w = wantOf(r, days, regions);
           const labels = ids => (ids || []).map(id => r.labelOf(id)).sort();
           const wantF = labels(w.plan.files), wantD = labels(w.plan.folders), gotF = labels(c.plannedFiles), gotD = labels(c.planned);
-          if (!same(gotF, wantF)) p.push('planned photos: ' + diff(gotF, wantF));
-          if (!same(gotD, wantD)) p.push('planned folders: ' + diff(gotD, wantD));
+          if (!same(gotF, wantF)) p.push('planned photos (' + gotF.length + ', want ' + wantF.length + '): ' + diff(gotF, wantF));
+          if (!same(gotD, wantD)) p.push('planned folders (' + gotD.length + ', want ' + wantD.length + '): ' + diff(gotD, wantD));
           if (c.capped !== w.want.capped) p.push('capped ' + c.capped + ', want ' + w.want.capped);
           p.push(...retentionProblems(retentionView(r.text, w.tops), w.want), ...namesProblems(said(r), w));
         }
@@ -5442,6 +5442,61 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
             '90 then 120: the 120-day plan; a region added: its folders read and planned too; a region taken out: none of its ' +
             'folders planned), never a mix', !cfgP.length, cfgP.slice(0, 3).join(' | '));
 
+      // a due photo moved, between the runs of one read, out of a folder a run already listed into one not listed yet
+      // (review of PR #266): the read sees it twice, once in each; the plan must hold it once, where it now is
+      const movedP = [];
+      {
+        const CAND_A = [[BRIGHT, F.A5], [MSC, F.A7], [SUN, F.A1], [EVE, F.S1], [SW, F.T1]].concat(range(1, 20).map(k => [INNER(k), GPHOTO(k)]));
+        const CAND_B = range(21, 40).reverse().map(INNER);
+        for (const nm of BOTH) {
+          const s = series(SERIES), init = belowRegions(s.env.model(), REGION_IDS), p = [];
+          const r1 = s.run(nm);
+          const listed1 = new Set(r1.reads.filter(x => x.op === 'list' && x.kind === 'listing' && x.last && !x.failed).flatMap(x => x.parents || []));
+          const a = CAND_A.find(([folder]) => listed1.has(r1.idOf[folder]));
+          const b = CAND_B.find(folder => !listed1.has(r1.idOf[folder]));
+          if (r1.planTrashCalls.length || !a || !b) {
+            movedP.push(nm + ': (run 1 ' + (r1.planTrashCalls.length ? 'read it all' : 'listed ' + (a ? 'no folder not listed yet' :
+                        'none of the folders holding a due photo')) + ': nothing to test) ' + tail([r1]));
+            continue;
+          }
+          const [A, P] = a;
+          s.env.mutate(['move', P, b]);   // still due: its new folder is older than it
+          const m = nm === REAL ? ma : mp;
+          const t = untilPlanned(s, nm, m.bound);
+          const runs = [r1].concat(t.seg);
+          if (!t.planning) p.push('no run planned within ' + m.bound + ' runs: ' + tail(t.seg));
+          else {
+            const ids = t.planning.planTrashCalls[0].plannedFiles || [];
+            const twice = ids.filter((id, i) => ids.indexOf(id) !== i);
+            if (twice.length) p.push('planned twice: ' + [...new Set(twice)].map(id => t.planning.labelOf(id)).join(', '));
+            p.push(...planningProblems(t.planning, 90, TARGET_IDS, init, true));
+            if (nm === REAL) {
+              const want = (w => w.plan.files.concat(w.plan.folders).map(id => t.planning.labelOf(id)).sort())(wantOf(t.planning, 90));
+              for (let i = 0; i < 2 * (ma.bound + 2) && trashedOver(runs).length < want.length; i++) runs.push(s.run(REAL));
+              const got = trashedOver(runs);
+              if (!same(got, want)) p.push('trashed over the runs: ' + diff(got, want));
+              const sent = runs.reduce((n, r) => n + r.ops.filter(o => o.op === 'update' && o.kind === 'trash' && o.fileId === r.idOf[P]).length, 0);
+              if (sent !== 1) p.push('the moved photo was sent ' + sent + ' trash(es), want 1');
+              const st = s.env.state(P);
+              if (!st || !st.trashed || st.parent !== b) p.push('the moved photo is not in the trash from its new folder: ' + JSON.stringify(st));
+              runs.forEach(r => p.push(...banned(r).map(x => 'run ' + r.k + ': ' + x)));
+            }
+          }
+          for (const r of runs) {
+            if (r.threw) p.push('run ' + r.k + ' threw: ' + r.threw.slice(0, 200));
+            else if (/\bTRASH_REFUSED\b/.test(r.text)) p.push('run ' + r.k + ': ' + (r.text.match(/TRASH_REFUSED[^\n]*/) || [''])[0].slice(0, 160));
+          }
+          if (p.length) {
+            movedP.push(nm + ' (' + P.split('/').pop() + ' moved after run 1 from "' + A.slice(2) + '" into "' + b.slice(2) + '"): ' +
+                        p.slice(0, 5).join('; '));
+          }
+        }
+      }
+      check('D2: a due photo moved between the runs of one read, out of a folder already listed into one not listed yet: the ' +
+            'read completes, the photo is planned and previewed once (the plan and would-trash counts of a full read of the ' +
+            'Drive as it now is), the real run trashes exactly that plan, the photo once, from its new folder; no TRASH_REFUSED, ' +
+            'no run error (both entry points)', !movedP.length, movedP.join(' | '));
+
       // ---------------------------------------------------------------- D3: reused partner and month folders in movedInto
       const PA = AF + 'Fixture Partner Alpha', PA06 = PA + '/2026-06', PA07 = PA + '/2026-07', M1 = PA07 + '/RET_M1.jpg';
       const PB = AF + 'Fixture Partner Beta', PB05 = PB + '/2026-05', PB08 = PB + '/2026-08';
@@ -5483,6 +5538,71 @@ console.log('\n#182 — RETENTION_DAYS, one Shared Drive, the reads and the woul
             'empty while Drive\'s search does not show what was made in them, are neither trashed nor sent a trash, nor what ' +
             'the run made below them; the due photo in July, the old empty 2026-06 and 2026-05 beside them and the rest of the ' +
             'plan go (with whole-drive searches answered, and without membership)', !reuseP.length, reuseP.join(' | '));
+      // D3 directly (review of PR #266: the read places a made folder's ancestors by Files.get, so the run above keeps the
+      // reused folders even when pathFolderId_ leaves them out): pathFolderId_(move, levels, movedInto), its long-standing
+      // name and signature, pushes each partner and month folder of the move's path, reused (its id in `levels`) or made
+      // (Drive.Files.create under the folder above it, its id then kept in `levels`), and returns the last one
+      const pfP = [];
+      {
+        const made = [];
+        let pf = null, loadErr = '';
+        try {
+          const create = (res, media, args) => {
+            const id = 'made-' + (made.length + 1) + '-' + String(res && res.name).replace(/\W+/g, '').toLowerCase();
+            made.push({ id, name: res && res.name, parents: res && res.parents, mime: res && res.mimeType, all: !!(args && args.supportsAllDrives) });
+            return { id, name: res && res.name };
+          };
+          const c = loadGs.sandbox(GS, Object.assign({}, trapped, { Drive: { Files: { create } } }));
+          pf = typeof c.pathFolderId_ === 'function' ? c.pathFolderId_ : null;
+        } catch (e) { loadErr = e.message; }
+        // [what, region folder, path, the ids `levels` holds for its folders (null: not there, to make)]
+        const PF = [
+          ['partner and month reused', 'reg-africa', ['Fixture Partner Alpha', '2026-07'], ['pid-alpha', 'mid-alpha-07']],
+          ['partner reused, month made', 'reg-africa', ['Fixture Partner Beta', '2026-08'], ['pid-beta', null]],
+          ['partner and month made', 'reg-asia', ['Fixture Partner Gamma', '2026-09'], [null, null]],
+          ['partner and month reused, another region and month', 'reg-latam', ['Fixture Partner Delta', '2027-01'], ['pid-delta', 'mid-delta-01']],
+        ];
+        const levelsOf = (path, ids) => {
+          const levels = {};
+          path.forEach((nm, k) => { levels[JSON.stringify(path.slice(0, k + 1))] = { id: ids[k], folder: null, refused: '' }; });
+          return levels;
+        };
+        const callPf = (what, to, path, levels) => {
+          const movedInto = [], before = made.length, ids = path.map((nm, k) => levels[JSON.stringify(path.slice(0, k + 1))].id);
+          let got, err = '';
+          try {
+            got = pf({ region: 'Africa', id: 'src-sub', name: path[0] + ' | Sunrise Club | 07-15-2026 | 2', path, to, files: [] }, levels, movedInto);
+          } catch (e) { err = String(e && e.message || e); }
+          const mk = made.slice(before);
+          const want = [];
+          let j = 0;
+          path.forEach((nm, k) => { want.push(ids[k] || (mk[j] ? mk[j++].id : '<not made>')); });
+          const p = [];
+          if (err) p.push('threw: ' + err);
+          if (got !== want[want.length - 1]) p.push('returned ' + JSON.stringify(got) + ', want ' + JSON.stringify(want[want.length - 1]));
+          const pushed = [...new Set(Array.from(movedInto))].sort(), wantPushed = want.slice().sort();
+          if (!same(pushed, wantPushed)) p.push('movedInto ' + show(pushed, wantPushed));
+          const wantMade = path.map((nm, k) => [nm, k ? want[k - 1] : to]).filter((x, k) => !ids[k]);
+          const gotMade = mk.map(x => [x.name, (x.parents || [])[0]]);
+          if (!same(gotMade, wantMade) || mk.some(x => x.mime !== DRIVE_FOLDER_MIME || !x.all || (x.parents || []).length !== 1)) {
+            p.push('made ' + show(gotMade, wantMade));
+          }
+          return p.map(x => what + ': ' + x);
+        };
+        if (!pf) pfP.push('pathFolderId_ is not a top-level function: ' + (loadErr || 'not defined'));
+        else {
+          for (const [what, to, path, ids] of PF) {
+            const levels = levelsOf(path, ids);
+            pfP.push(...callPf(what, to, path, levels));
+            // the next move into the same path this run: what the first one made is reused now
+            if (ids.some(x => !x)) pfP.push(...callPf(what + ', then the next move into that path', to, path, levels));
+          }
+        }
+      }
+      check('D3, pathFolderId_ directly: each partner and month folder of the move\'s path is pushed to movedInto, reused ' +
+            '(its id in levels) or made (one Drive.Files.create, supportsAllDrives, under the folder above it), and the last is ' +
+            'returned (both reused; the partner reused and the month made; both made, then the next move into that path ' +
+            'reusing them; both reused in another region)', !pfP.length, pfP.slice(0, 6).join('; '));
 
       // ---------------------------------------------------------------- D1 and V4 over every run of this part
       const aggP = [];

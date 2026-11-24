@@ -731,8 +731,10 @@ function previewRetention_(config, shared, days, readBy, apply, movedInto) {
  * listSharedDrive_; ids, types and createdTime, no name), followed to its last page; a region folder's own folders
  * also by name (the only names the log gives, R14). Of its items: each folder is found (a region folder among them:
  * something there stays); each file whose due moment (the later of its createdTime and the folder's, plus
- * `days`) is at most RETENTION_READ_MAX_MS after `now` is kept by id, any other only as "something there stays". A
- * folder counts as listed once its listing reached its last page, and only then. Once all are listed, the folders of
+ * `days`) is at most RETENTION_READ_MAX_MS after `now` is kept by id, any other only as "something there stays"; a
+ * file kept from an earlier listing (it moved here since, from a folder listed before) is kept once, as this listing
+ * has it, its earlier folder then planned without it (a file that stays is kept by no id, so its earlier folder still
+ * stays). A folder counts as listed once its listing reached its last page, and only then. Once all are listed, the folders of
  * `movedInto` no listing showed (#191: Drive's search may not yet show what this run made or filled) are placed by
  * Files.get, each walked up to a folder the read knows (otherwise left out: not below a region folder), and listed
  * too. True once all of that is done, false when `readBy` came first; a Drive error throws.
@@ -744,6 +746,7 @@ function previewRetention_(config, shared, days, readBy, apply, movedInto) {
 function readRetention_(state, driveId, now, days, readBy, movedInto) {
   const f = state.f, roots = f.filter(x => x.p === -1).length, at = new Map(f.map((x, i) => [x.id, i]));
   const keepBy = now.getTime() - days * 24 * 60 * 60 * 1000 + RETENTION_READ_MAX_MS;
+  const kept = new Map(state.d.map(e => [e.id, e]));   // file id -> its entry in state.d: each file once
   const add = (id, parent, created, name) => {
     at.set(id, f.length);
     f.push({ id: id, p: parent, c: created, s: 0, n: parent < roots ? String(name || '') : undefined });
@@ -762,18 +765,28 @@ function readRetention_(state, driveId, now, days, readBy, movedInto) {
         if (!got.complete) return false;
         names = new Map(got.files.map(x => [x.id, x.name]));
       }
-      let stays = false;
+      let stays = false, moved = false;
       for (const x of items.files) {
         const created = timeOf_(driveTime_(x.createdTime));
         if (x.mimeType === FOLDER_MIME) {
           if (!at.has(x.id)) add(x.id, i, created, names.get(x.id));
           else if (at.get(x.id) < roots) stays = true;   // a region folder nested here: never trashed, nor what holds it
-        } else if (Math.max(created, node.c) <= keepBy) {
-          state.d.push({ i: i, id: x.id, c: created });
+          continue;
+        }
+        if (kept.has(x.id)) {   // kept from an earlier listing: it moved here since, and this listing is where it is now
+          kept.get(x.id).gone = true;
+          kept.delete(x.id);
+          moved = true;
+        }
+        if (Math.max(created, node.c) <= keepBy) {
+          const e = { i: i, id: x.id, c: created };
+          state.d.push(e);
+          kept.set(x.id, e);
         } else {
           stays = true;
         }
       }
+      if (moved) state.d = state.d.filter(e => !e.gone);
       node.s = stays ? 2 : 1;
     }
     return true;
