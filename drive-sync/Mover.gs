@@ -25,9 +25,13 @@
  *
  * A run reads for at most half its time budget, then moves for the rest (TIME_BUDGET either way:
  * what was not read or not moved waits for the next run). With retention on, both entry points
- * then read that Shared Drive, inside the same budget, plan with Plan.gs planTrash_ and log what
- * it would trash, per region: counts, and the names of the region folders' direct subfolders only
- * (ruling R14). A retention read that fails is RETENTION_FAILED: nothing previewed or trashed, the
+ * then read that Shared Drive, inside the same budget, folder by folder from the region folders
+ * down (#265: the account is no member of the Shared Drive, so each listing names one folder),
+ * carried on across runs in the Script Properties RETENTION_STATE_PREVIEW_* / RETENTION_STATE_APPLY_*
+ * (the dry run's and the real run's apart); the run that completes the read plans with Plan.gs
+ * planTrash_ and logs what it would trash, per region: counts, and the names of the region folders'
+ * direct subfolders only (ruling R14). Nothing is planned or trashed from a partial read. A
+ * retention read that fails is RETENTION_FAILED: nothing previewed or trashed, the
  * moves done as ever, and the run ends with an error after them. The dry run changes nothing on the
  * Shared Drive; the real run then trashes that plan (#185, trashRetention_): the due photos, at most
  * 100 a run, then the emptied folders below the region folders, children first, each re-checked
@@ -81,6 +85,10 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const BIN_BATCH = 20;   // subfolders in the trash whose files one Drive query lists (#144, the rescue)
 const RETENTION_MAX_FILES = 100;   // due files planned per run, earliest due first (ruling R6); the rest: RETENTION_CAP
 const RETENTION_PAGE_SIZE = 1000;  // Drive's largest Files.list page
+const RETENTION_TRASH_MS = 1.5 * 60 * 1000;   // the real run ends its retention read this long before its budget: its trash's time
+const RETENTION_READ_MAX_MS = 24 * 60 * 60 * 1000;   // #265: a kept read older than this starts again; a file due within it is kept by id
+const RETENTION_STATE = 'RETENTION_STATE_';   // the prefix of every Script Property a retention read keeps between runs (#265)
+const RETENTION_CHUNK = 8000;      // characters per kept value, all ASCII: under Apps Script's 9 KB a value
 
 function previewMoves() {
   runMover_(false);
@@ -174,7 +182,8 @@ function runMover_(apply) {
   }
   try {
     const opened = openRegionFolders_(config);
-    const driveId = days === null ? null : sharedDriveOf_(config);
+    const shared = days === null ? null : sharedDriveOf_(config);
+    const driveId = shared ? shared.id : null;
     const protect = apply ? protectedIds_(config) : null;
     const read = readDrives_(opened, started + RUN_BUDGET_MS / 2);
     const plan = holdRefusedPaths_(planMoves_(read.sources, read.targets, new Date(), SETTLE_MINUTES), read.levels);
@@ -189,7 +198,8 @@ function runMover_(apply) {
         moveError = e;
       }
     }
-    const retention = days === null ? null : previewRetention_(config, driveId, days, started + RUN_BUDGET_MS, apply);
+    const retention = days === null ? null :
+      previewRetention_(config, shared, days, started + RUN_BUDGET_MS - (apply ? RETENTION_TRASH_MS : 0), apply, movedInto);
     const failures = retention && retention.failure ? [retention.failure] : [];
     if (apply && retention && retention.planned) {
       const trashFailure = trashRetention_(retention.planned, config, driveId, started + RUN_BUDGET_MS, protect, movedInto);
@@ -206,18 +216,20 @@ function runMover_(apply) {
  * With retention on (#182, ruling R5): the id of the one Shared Drive every target folder is on, read by
  * Drive.Files.get. Each must report a driveId, all the same one, not be in the trash, and not be that drive's root
  * (its id is the drive's: the root holds everything, a region folder never may); otherwise CONFIG refused, before
- * any move.
+ * any move. Returns {id: the drive's id, roots: {<target id>: {created: its createdTime as a Date (null for none),
+ * parent: its one parent}}} (#265: the retention read starts from these folders).
  */
 function sharedDriveOf_(config) {
-  const problems = [];
+  const problems = [], roots = {};
   let driveId = null, firstName = '';
   for (const c of config) {
     const name = 'TARGET_FOLDER_' + REGION_KEYS[c.region];
-    const got = Drive.Files.get(c.target, { fields: 'id, driveId, trashed', supportsAllDrives: true });
+    const got = Drive.Files.get(c.target, { fields: 'id, driveId, trashed, createdTime, parents', supportsAllDrives: true });
     if (!got || !got.driveId) {
       problems.push(name + ' is not on a Shared Drive');
       continue;
     }
+    roots[c.target] = { created: driveTime_(got.createdTime), parent: oneParent_(got) };
     if (got.driveId === c.target) problems.push(name + ' is the Shared Drive itself (its root), not a region folder on it');
     if (got.trashed !== false) problems.push(name + ' is in the trash');
     if (driveId === null) {
@@ -231,7 +243,7 @@ function sharedDriveOf_(config) {
     throw new Error('CONFIG refused, RETENTION_DAYS is set and needs every target folder on one Shared Drive: ' +
                     problems.join('; '));
   }
-  return driveId;
+  return { id: driveId, roots: roots };
 }
 
 /**
@@ -383,8 +395,9 @@ function holdRefusedPaths_(plan, levels) {
 /**
  * The id of the folder a move's new folder goes in: the region folder `to` for path [], else the
  * last of its <Partner>/<YYYY-MM> folders, each one the read found reused, each one missing made
- * (Drive.Files.create, supportsAllDrives) and kept in `levels` for the moves after it, and pushed
- * to `movedInto`. Throws when a level was not read or was refused, or Drive does not confirm one.
+ * (Drive.Files.create, supportsAllDrives) and kept in `levels` for the moves after it; each one,
+ * reused or made, pushed to `movedInto` (#265: retention keeps it that run, #191). Throws when a
+ * level was not read or was refused, or Drive does not confirm one.
  */
 function pathFolderId_(move, levels, movedInto) {
   let parent = move.to;
@@ -396,8 +409,8 @@ function pathFolderId_(move, levels, movedInto) {
       const made = Drive.Files.create({ name: path[k], mimeType: FOLDER_MIME, parents: [parent] }, null, { supportsAllDrives: true });
       if (!made || !made.id) throw new Error('Drive did not confirm the folder "' + path.slice(0, k + 1).join('/') + '"');
       at.id = made.id;
-      movedInto.push(made.id);
     }
+    movedInto.push(at.id);
     parent = at.id;
   }
   return parent;
@@ -533,7 +546,8 @@ function logPlan_(plan, config, apply, inTrash) {
  * Every failure is logged by code, region and folder name, the rest of the run goes on, then one
  * error. A move whose folder exists but whose files did not all move is a merge on the next run.
  * `movedInto` (#191) gets the id of each Shared Drive folder made, and each merged into, before its
- * first file moves (an array the caller keeps, so a failure's error does not lose it).
+ * first file moves, and of each partner and month folder a move goes under (#265, pathFolderId_)
+ * (an array the caller keeps, so a failure's error does not lose it).
  */
 function carryOut_(plan, deadline, read, protect, movedInto) {
   const failed = [], left = [];
@@ -646,80 +660,288 @@ function whyNotRemove_(entry, sourceId) {
 }
 
 /**
- * The retention preview (#182, epic #179, rulings R7 and R14): the Shared Drive `driveId` read, Plan.gs planTrash_ run
- * on it and its plan logged (logRetention_); nothing is trashed or changed. The reads, each on the drive's corpus with
- * `trashed = false` stated and followed to its last page, until `deadline` (checked before each page):
- *   1. every folder on the drive (the region folders included), so every walk up resolves offline;
- *   2. the files created at or before now - days: a pre-filter, since no other file can be due;
- *   3. the files of each folder retentionFolders_ names (the old ones below a region folder), then of each region
- *      folder; a folder is `complete` once its listing reached its last page, and only then.
- * Steps 1 or 2 not done by the deadline: retention is skipped this run (TIME_BUDGET), so planTrash_ never sees a
- * partial folder list. Step 3 not done: the folders not listed in full stay incomplete (never emptied this run) and
- * the rest is planned. A Drive error at any step: RETENTION_FAILED, nothing planned. Returns {failure: the
- * RETENTION_FAILED text the caller ends the run with, '' otherwise; planned: {trash: planTrash_'s plan, drive: what it
- * was given, now, days} for trashRetention_ (#185, on `apply` only), null when nothing was planned}. Drive's
- * createdTime reaches the planner as a Date (driveTime_); an item's parent is its one parent, null with none or more.
+ * The retention preview (#182, epic #179, rulings R7 and R14; #265): the Shared Drive `shared.id` (sharedDriveOf_) read
+ * folder by folder from the region folders down (readRetention_), until `readBy`, on from where this entry point's
+ * last run stopped (loadRetentionState_); once read in full, Plan.gs planTrash_ run on it (retentionDrive_) and its
+ * plan logged (logRetention_), and the kept read deleted: the next run starts a new one. Nothing is trashed or changed.
+ * A read not complete by `readBy` is kept for the next run (saveRetentionState_): TIME_BUDGET, nothing planned, no
+ * error. A Drive error, or a read the Script Properties cannot hold: RETENTION_FAILED, nothing planned (what was listed
+ * in full before a Drive error is kept; the next run tries the rest again). `movedInto`: the folders this run's moves
+ * went into (readRetention_ places those no listing showed). Returns {failure: the RETENTION_FAILED text the caller
+ * ends the run with, '' otherwise; planned: {trash: planTrash_'s plan, drive: what it was given, now, days} for
+ * trashRetention_ (#185, on `apply` only), null when nothing was planned}.
  */
-function previewRetention_(config, driveId, days, deadline, apply) {
+function previewRetention_(config, shared, days, readBy, apply, movedInto) {
   const now = new Date();
-  const notFolder = "mimeType != '" + FOLDER_MIME + "' and trashed = false";
-  let step = 'the cutoff';
+  let step = 'the cutoff', saving = false;
   try {
     const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
     console.log('retention ' + days + ' days (due once a photo and its folder were both created at or before ' + cutoff +
                 (apply ? '): the plan below goes to the trash, each item re-checked just before'
                        : '): a preview, nothing on the Shared Drive goes to the trash'));
-    step = 'the search for the Shared Drive\'s folders';
-    const found = listSharedDrive_(driveId, "mimeType = '" + FOLDER_MIME + "' and trashed = false", 'id, name, createdTime, parents',
-                                   deadline);
-    if (!found.complete) {
-      console.log('TIME_BUDGET: retention skipped (folder list incomplete); it waits for the next run');
+    step = 'the progress kept by the last run';
+    const key = JSON.stringify([days, shared.id, config.map(c => [c.region, c.target])]);
+    const state = loadRetentionState_(apply, key, config.map(c => c.target), now);
+    config.forEach((c, i) => { state.f[i].c = timeOf_(shared.roots[c.target].created); });
+    state.r++;
+    let complete = false, readError = null;
+    try {
+      complete = readRetention_(state, shared.id, now, days, readBy, movedInto);
+    } catch (e) {
+      readError = e;
+    }
+    const listed = state.f.filter(x => x.s !== 0).length, left = state.f.length - listed;
+    step = 'the progress kept for the next run (' + listed + ' folder(s) listed)';
+    saving = true;
+    const kb = saveRetentionState_(apply, complete && !readError ? null : state);
+    saving = false;
+    if (readError) {
+      step = 'the read (run ' + state.r + ' of it, ' + listed + ' folder(s) listed; the next run tries the rest again)';
+      throw readError;
+    }
+    if (!complete) {
+      console.log('TIME_BUDGET: retention read not complete (run ' + state.r + ' of it: ' + listed + ' folder(s) listed, ' + left +
+                  ' found and not listed yet, ' + kb + ' KB kept): nothing planned or trashed this run; the next run reads on');
       return { failure: '', planned: null };
     }
-    step = 'the search for the files created at or before the cutoff';
-    const due = listSharedDrive_(driveId, notFolder + " and createdTime <= '" + cutoff + "'", 'id, createdTime, parents', deadline);
-    if (!due.complete) {
-      console.log('TIME_BUDGET: retention skipped (due-file search incomplete); it waits for the next run');
-      return { failure: '', planned: null };
-    }
-    const regions = {};
-    for (const c of config) regions[c.region] = c.target;
-    const folders = found.files.map(f => ({ id: f.id, name: f.name, parent: oneParent_(f), created: driveTime_(f.createdTime),
-                                            complete: false }));
-    const drive = { regions: regions, rootId: driveId, folders: folders, files: [] };
-    const seen = new Set();
-    const addFiles = list => {
-      for (const f of list) {
-        if (seen.has(f.id)) continue;
-        seen.add(f.id);
-        drive.files.push({ id: f.id, parent: oneParent_(f), created: driveTime_(f.createdTime) });
-      }
-    };
-    addFiles(due.files);
-    const byId = new Map(folders.map(d => [d.id, d]));
-    const toList = retentionFolders_(drive, now, days).concat(config.map(c => c.target));
-    let listed = 0;
-    for (const id of toList) {
-      step = 'the listing of folder ' + (listed + 1) + ' of ' + toList.length + ' (the old folders, then the region folders)';
-      const got = listSharedDrive_(driveId, "'" + id + "' in parents and " + notFolder, 'id, createdTime, parents', deadline);
-      addFiles(got.files);
-      if (!got.complete) break;
-      if (byId.has(id)) byId.get(id).complete = true;
-      listed++;
-    }
-    if (listed < toList.length) {
-      console.log('TIME_BUDGET: retention listed the files of ' + listed + ' of ' + toList.length +
-                  ' folder(s) in time; no folder it did not list in full is planned this run');
-    }
+    console.log('retention read complete: ' + listed + ' folder(s) listed in ' + state.r + ' run(s)');
     step = 'the plan';
+    const drive = retentionDrive_(state, config, shared);
     const trash = planTrash_(drive, now, days, RETENTION_MAX_FILES);
-    logRetention_(trash, config, days, byId);
+    logRetention_(trash, config, days, new Map(drive.folders.map(d => [d.id, d])));
     return { failure: '', planned: { trash: trash, drive: drive, now: now, days: days } };
   } catch (e) {
+    if (saving) {
+      try {
+        saveRetentionState_(apply, null);   // nothing half-kept: the next run reads again from the region folders
+      } catch (ignored) {
+        // the failure below says what went wrong
+      }
+    }
     const failure = 'RETENTION_FAILED ' + step + ': ' + errorText_(e) + '; nothing previewed this run';
     console.log(failure);
     return { failure: failure, planned: null };
   }
+}
+
+/**
+ * One run's part of the retention read (#265), on the kept read `state` (changed in place), until `readBy` (checked
+ * before each listing and each page). Each folder found and not yet listed, in the order found (the region folders
+ * first): one Drive.Files.list of its live items (`'<id>' in parents and trashed = false`, on the drive's corpus:
+ * listSharedDrive_; ids, types and createdTime, no name), followed to its last page; a region folder's own folders
+ * also by name (the only names the log gives, R14). Of its items: each folder is found (a region folder among them:
+ * something there stays); each file whose due moment (the later of its createdTime and the folder's, plus
+ * `days`) is at most RETENTION_READ_MAX_MS after `now` is kept by id, any other only as "something there stays"; a
+ * file kept from an earlier listing (it moved here since, from a folder listed before) is kept once, as this listing
+ * has it, its earlier folder then planned without it (a file that stays is kept by no id, so its earlier folder still
+ * stays). A folder counts as listed once its listing reached its last page, and only then. Once all are listed, the folders of
+ * `movedInto` no listing showed (#191: Drive's search may not yet show what this run made or filled) are placed by
+ * Files.get, each walked up to a folder the read knows (otherwise left out: not below a region folder), and listed
+ * too. True once all of that is done, false when `readBy` came first; a Drive error throws.
+ *   state  {v: 1, k: the setting it belongs to, t: when its read began (ms), r: its runs, f: [{id, p: its parent's index
+ *          (-1: a region folder), c: createdTime ms (NaN: none), s: 0 not listed | 1 listed | 2 listed, holding
+ *          something that stays, n: name (a region folder's folders only)}], d: [{i: its folder's index, id, c}]}, the
+ *          region folders first, in the configuration's order
+ */
+function readRetention_(state, driveId, now, days, readBy, movedInto) {
+  const f = state.f, roots = f.filter(x => x.p === -1).length, at = new Map(f.map((x, i) => [x.id, i]));
+  const keepBy = now.getTime() - days * 24 * 60 * 60 * 1000 + RETENTION_READ_MAX_MS;
+  const kept = new Map(state.d.map(e => [e.id, e]));   // file id -> its entry in state.d: each file once
+  const add = (id, parent, created, name) => {
+    at.set(id, f.length);
+    f.push({ id: id, p: parent, c: created, s: 0, n: parent < roots ? String(name || '') : undefined });
+  };
+  const listAll = () => {
+    for (let i = 0; i < f.length; i++) {
+      const node = f[i];
+      if (node.s !== 0) continue;
+      if (Date.now() > readBy) return false;
+      const items = listSharedDrive_(driveId, "'" + node.id + "' in parents and trashed = false", 'id, mimeType, createdTime', readBy);
+      if (!items.complete) return false;
+      let names = new Map();
+      if (i < roots) {
+        const got = listSharedDrive_(driveId, "'" + node.id + "' in parents and mimeType = '" + FOLDER_MIME + "' and trashed = false",
+                                     'id, name', readBy);
+        if (!got.complete) return false;
+        names = new Map(got.files.map(x => [x.id, x.name]));
+      }
+      let stays = false, moved = false;
+      for (const x of items.files) {
+        const created = timeOf_(driveTime_(x.createdTime));
+        if (x.mimeType === FOLDER_MIME) {
+          if (!at.has(x.id)) add(x.id, i, created, names.get(x.id));
+          else if (at.get(x.id) < roots) stays = true;   // a region folder nested here: never trashed, nor what holds it
+          continue;
+        }
+        if (kept.has(x.id)) {   // kept from an earlier listing: it moved here since, and this listing is where it is now
+          kept.get(x.id).gone = true;
+          kept.delete(x.id);
+          moved = true;
+        }
+        if (Math.max(created, node.c) <= keepBy) {
+          const e = { i: i, id: x.id, c: created };
+          state.d.push(e);
+          kept.set(x.id, e);
+        } else {
+          stays = true;
+        }
+      }
+      if (moved) state.d = state.d.filter(e => !e.gone);
+      node.s = stays ? 2 : 1;
+    }
+    return true;
+  };
+  const place = () => {
+    for (const id of new Set(movedInto)) {
+      const chain = [];
+      let up = id;
+      while (typeof up === 'string' && up && !at.has(up) && up !== driveId && chain.length < 50 &&
+             !chain.some(x => x.id === up)) {
+        if (Date.now() > readBy) return false;
+        const got = Drive.Files.get(up, { fields: 'id, name, mimeType, trashed, parents, createdTime, driveId', supportsAllDrives: true });
+        if (!got || got.mimeType !== FOLDER_MIME || got.trashed !== false || got.driveId !== driveId) break;
+        chain.push(got);
+        up = oneParent_(got);
+      }
+      if (!chain.length || !at.has(up)) continue;
+      for (let k = chain.length - 1; k >= 0; k--) {   // top down: a parent before what is in it
+        add(chain[k].id, at.get(k === chain.length - 1 ? up : chain[k + 1].id), timeOf_(driveTime_(chain[k].createdTime)),
+            chain[k].name);
+      }
+    }
+    return true;
+  };
+  return listAll() && place() && listAll();
+}
+
+/**
+ * planTrash_'s `drive` from a complete read (#265): every folder found, each `complete` (listed to its last page), the
+ * region folders with this run's parent and createdTime; the files kept by id; and for each folder holding something
+ * that stays (a file not due within RETENTION_READ_MAX_MS of its listing, or a region folder) one stand-in file with no
+ * id and no date: planTrash_ never plans it, and it keeps that folder and those above it as what it stands for would.
+ */
+function retentionDrive_(state, config, shared) {
+  const regions = {}, f = state.f, date = ms => (Number.isFinite(ms) ? new Date(ms) : null);
+  for (const c of config) regions[c.region] = c.target;
+  const folders = f.map((x, i) => (x.p === -1 ?
+    { id: x.id, name: config[i].region, parent: shared.roots[x.id].parent, created: shared.roots[x.id].created, complete: x.s !== 0 } :
+    { id: x.id, name: x.n || '', parent: f[x.p].id, created: date(x.c), complete: x.s !== 0 }));
+  const files = state.d.map(e => ({ id: e.id, parent: f[e.i].id, created: date(e.c) }))
+    .concat(f.filter(x => x.s === 2).map(x => ({ id: '', parent: x.id, created: null })));
+  return { regions: regions, rootId: shared.id, folders: folders, files: files };
+}
+
+/**
+ * This entry point's kept retention read (`apply`: the real run's, else the dry run's; #265), as readRetention_ takes
+ * it; a new one (the region folders `targets`, none listed) when none is kept, it cannot be read in full, it belongs to
+ * another setting `key` (RETENTION_DAYS, the drive, the regions and their folders), or it began more than
+ * RETENTION_READ_MAX_MS before `now`.
+ */
+function loadRetentionState_(apply, key, targets, now) {
+  const prefix = retentionStatePrefix_(apply), count = prefix + 'n';
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const fresh = { v: 1, k: key, t: now.getTime(), r: 0, f: targets.map(id => ({ id: id, p: -1, c: NaN, s: 0 })), d: [] };
+  if (!Object.prototype.hasOwnProperty.call(props, count)) return fresh;
+  let kept;
+  try {
+    const n = /^[1-9]\d{0,3}$/.test(String(props[count])) ? Number(props[count]) : 0;
+    if (!n) throw new Error('no count of its parts');
+    let text = '';
+    for (let i = 0; i < n; i++) {
+      if (typeof props[prefix + i] !== 'string') throw new Error('part ' + i + ' of ' + n + ' missing');
+      text += props[prefix + i];
+    }
+    const o = JSON.parse(text);
+    if (o && o.v === 1 && o.k !== key) {
+      console.log('retention read: RETENTION_DAYS or the region folders changed since the last run: what it kept is dropped and ' +
+                  'the read starts again');
+      return fresh;
+    }
+    kept = decodeRetentionState_(o, key, targets);
+  } catch (e) {
+    console.log('retention read: the progress kept by the last run (' + prefix + '*) could not be read (' + errorText_(e) +
+                '): the read starts again');
+    return fresh;
+  }
+  if (!(now.getTime() - kept.t >= 0 && now.getTime() - kept.t <= RETENTION_READ_MAX_MS)) {
+    console.log('retention read: the kept read began more than ' + RETENTION_READ_MAX_MS / 3600000 + ' hours ago: dropped, the ' +
+                'read starts again');
+    return fresh;
+  }
+  const listed = kept.f.filter(x => x.s !== 0).length;
+  console.log('retention read: carrying on from the last run (' + listed + ' folder(s) listed, ' + (kept.f.length - listed) +
+              ' found and not listed yet)');
+  return kept;
+}
+
+/** The kept read `o` (JSON) as readRetention_ takes it, every part checked; anything off throws (it is not progress). */
+function decodeRetentionState_(o, key, targets) {
+  const ms = v => {
+    if (typeof v !== 'string' || !/^-?[0-9a-z]{1,12}$/.test(v)) throw new Error('a time that is not one');
+    return parseInt(v, 36);
+  };
+  const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v < hi;
+  if (!o || o.v !== 1 || o.k !== key || !whole(o.r, 1, 1e6) || !Array.isArray(o.f) || !Array.isArray(o.d) ||
+      o.f.length < targets.length) {
+    throw new Error('not a kept read of this setting');
+  }
+  const seen = new Set();
+  const f = o.f.map((x, i) => {
+    const root = i < targets.length;
+    if (!Array.isArray(x) || typeof x[0] !== 'string' || !x[0] || seen.has(x[0]) || (root && x[0] !== targets[i]) ||
+        !(root ? x[1] === -1 : whole(x[1], 0, i)) || !whole(x[3], 0, 3) ||
+        (x[4] !== undefined && (typeof x[4] !== 'string' || x[1] >= targets.length || x[1] < 0))) {
+      throw new Error('folder ' + i + ' is not one');
+    }
+    seen.add(x[0]);
+    return { id: x[0], p: x[1], c: x[2] === null ? NaN : ms(x[2]), s: x[3], n: x[4] };
+  });
+  const d = o.d.map((x, k) => {
+    if (!Array.isArray(x) || !whole(x[0], 0, f.length) || f[x[0]].s === 0 || typeof x[1] !== 'string' || !x[1]) {
+      throw new Error('file ' + k + ' is not one');
+    }
+    return { i: x[0], id: x[1], c: ms(x[2]) };
+  });
+  return { v: 1, k: key, t: ms(o.t), r: o.r, f: f, d: d };
+}
+
+/**
+ * `state` (readRetention_) kept for this entry point's next run, as ASCII JSON in values of RETENTION_CHUNK characters
+ * (prefix + '0', '1', ..., and prefix + 'n' their count) in one setProperties, then this prefix's values left over
+ * deleted; `state` null: every value of this prefix deleted. No other property is written or deleted. Returns the
+ * size kept, in KB; a store that refuses it (Apps Script: 9 KB a value, 500 KB in all) throws, naming that size.
+ */
+function saveRetentionState_(apply, state) {
+  const prefix = retentionStatePrefix_(apply), count = prefix + 'n';
+  const store = PropertiesService.getScriptProperties();
+  let parts = 0, kb = 0;
+  if (state) {
+    const b36 = v => (Number.isFinite(v) ? Math.round(v).toString(36) : null);
+    const o = { v: 1, k: state.k, t: b36(state.t), r: state.r,
+                f: state.f.map(x => [x.id, x.p, b36(x.c), x.s].concat(x.n === undefined ? [] : [x.n])),
+                d: state.d.map(e => [e.i, e.id, b36(e.c)]) };
+    const text = JSON.stringify(o).replace(/[\u007f-\uffff]/g, ch => '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4));
+    const values = {};
+    for (let i = 0; i < text.length; i += RETENTION_CHUNK) values[prefix + (parts++)] = text.slice(i, i + RETENTION_CHUNK);
+    values[count] = String(parts);
+    kb = Math.ceil(text.length / 1024);
+    try {
+      store.setProperties(values);
+    } catch (e) {
+      throw new Error(kb + ' KB in ' + parts + ' value(s) not kept: ' + errorText_(e));
+    }
+  } else if (store.getProperty(count) !== null) {
+    store.deleteProperty(count);
+  }
+  for (const k of store.getKeys()) {
+    const part = k.indexOf(prefix) === 0 ? k.slice(prefix.length) : null;
+    if (part !== null && part !== 'n' && !(/^\d+$/.test(part) && Number(part) < parts)) store.deleteProperty(k);
+  }
+  return kb;
+}
+
+function retentionStatePrefix_(apply) {
+  return RETENTION_STATE + (apply ? 'APPLY_' : 'PREVIEW_');
 }
 
 /**
@@ -756,8 +978,9 @@ function driveTime_(text) {
 /**
  * planTrash_'s plan as the log's `would trash` lines (ruling R14): per configured region its counts, then per region
  * subfolder affected (a region folder's direct subfolder, `top`) its counts with everything deeper under it, by name,
- * and the files directly in the region folder; then how many old files lie outside the region folders, and
- * RETENTION_CAP with the due files the cap left out. No file's name, and no folder's but a region subfolder's.
+ * and the files directly in the region folder; then, when not 0, how many old files lie outside the region folders
+ * (#265: a read from the region folders down sees none) and RETENTION_CAP with the due files the cap left out. No
+ * file's name, and no folder's but a region subfolder's.
  */
 function logRetention_(trash, config, days, foldersById) {
   for (const c of config) {
@@ -766,7 +989,9 @@ function logRetention_(trash, config, days, foldersById) {
                 ' folder(s)');
     const tops = new Map();
     const under = id => {
-      if (!tops.has(id)) tops.set(id, { name: foldersById.get(id).name, files: 0, folders: 0 });
+      // (#265: the read holds only what is below a region folder; a plan naming anything else, trashRetention_ refuses)
+      const read = foldersById.get(id);
+      if (!tops.has(id)) tops.set(id, { name: read ? read.name : '(not in the read)', files: 0, folders: 0 });
       return tops.get(id);
     };
     let direct = 0;
@@ -781,7 +1006,7 @@ function logRetention_(trash, config, days, foldersById) {
     }
     if (direct) console.log('  would trash ' + direct + ' file(s) directly in the region folder');
   }
-  console.log('retention: ' + trash.outside + ' old file(s) outside the region folders, left alone');
+  if (trash.outside) console.log('retention: ' + trash.outside + ' old file(s) outside the region folders, left alone');
   if (trash.capped) console.log('RETENTION_CAP: ' + trash.capped + ' due file(s) left for the next run');
 }
 
