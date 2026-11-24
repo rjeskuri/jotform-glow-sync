@@ -1,7 +1,7 @@
 ---
 title: Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name
 author: Claude (ticket #225, with Ryan's option A of 2026-11-18)
-status: proposed         # the mover's code is built offline (#225); the live steps wait for Ryan
+status: in-progress      # live mover updated 2026-11-23; #236, the naming and #237 to go
 created: 2026-11-19
 intent: GLOW staff via Ryan, 2026-11-18 - confirm the photo dates are session dates; the week number in the photo naming; club folders grouped by partner and month within each region
 ---
@@ -178,4 +178,23 @@ Ticket #237 does it: [plan](2026-11-23-refile-photo-folders.md).
   couple of days before Drive "Modified" (an upper bound on the upload). Answer for staff: the
   dates are session dates ("The staff answer on dates", above).
 
-<!-- To fill: each live step with its date (UTC) and counts, `Live:` -->
+- **Rollout step 2, the live mover: done**, 2026-11-23, on Ryan's go, as the company account.
+  Done before step 1: the mover accepts both namings, so the order is safe.
+  - `removeTrigger` by Ryan, then main's `Plan.gs` and `Mover.gs` at `ca244e7` pushed with
+    clasp (a separate company-account login, not a paste) at 10:47 UTC. The manifest was unchanged.
+  - Backup: the live code pulled before the push at 09:53 UTC was #144's (`8e5dabc`), so
+    retention (#183) had never been live.
+  - Read back by `clasp pull` after the push: `Plan.gs`, `Mover.gs` and `appsscript.json` equal
+    `ca244e7`.
+  - Three earlier pushes printed `Pushed 3 files.` but failed: the company account had the Apps
+    Script API off (`User has not enabled the Apps Script API`). clasp 2.4.2 prints the error,
+    then the success line, and exits 0. Ryan turned the API on in script.google.com's user
+    settings.
+  - `previewMoves`: the summary as expected (Ryan, by eye). `installTrigger` by Ryan; the next
+    execution Completed.
+  - `RETENTION_DAYS` is unset, so retention stays off. #183 carries the reused-folder
+    `movedInto` fix, which must land before it is set.
+- **Still to do:** step 1 (#236, question 331 filled), then steps 3-4 (the integration naming),
+  then #237 (re-filing the existing folders: Ryan's 2026-11-23 rulings on #237).
+
+Live: photo mover code ca244e7, 2026-11-23 10:47 UTC, Ryan's go.
