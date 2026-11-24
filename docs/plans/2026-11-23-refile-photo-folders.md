@@ -1,8 +1,9 @@
 ---
 title: The photo folders already on the Shared Drive re-filed once under Region / Partner / Month
 author: Claude (ticket #237, with Ryan's decisions of 2026-11-23)
-status: proposed         # the code lands offline (#237); every live step waits on Ryan's go
+status: done
 created: 2026-11-23
+done: 2026-11-24
 intent: GLOW staff via Ryan, 2026-11-18 - the existing club folders grouped by partner and month like the new ones (#225); Ryan's decisions on ticket #237, 2026-11-23
 ---
 
@@ -225,3 +226,21 @@ refile_list_test` (from `test/`), `harness-red run`; `node test/drive_sync_test.
 - 2026-11-24: step 3 done (the push of #237 and `RefileList`, 384 clubs; trigger installed).
   Step 4 stopped in the first region, nothing moved: the membership error above; fixed by #262,
   then step 3's push again and step 4 repeated.
+- 2026-11-24 05:17 UTC: step 3 again, the push of c05dcb9 (#262) and the same `RefileList`
+  (384 clubs), read back equal; trigger installed.
+- 2026-11-24 05:18-05:22 UTC: step 4, `previewRefile`: one run read every region in full
+  (`cycle complete`); U.S skipped (`TARGET_FOLDER_US` not set). Step 5: Ryan reviewed the
+  regions' plans in the log and gave the go; their counts were not copied here.
+- 2026-11-24 05:25-06:27 UTC: step 6, `refileExisting`, several runs. The first read 489 Africa
+  folders and moved nothing (half the run's time goes to reading); the runs after it finished
+  the reads and made the moves. The last run: 45 folders moved (Latin America 44, Template 1),
+  16 partner or month folders made, 0 skipped, 0 failures, `cycle complete`. The earlier runs'
+  `done:` lines (the Africa and Asia moves) were not copied here: the total moved is not
+  recorded. No run reported a failure.
+- 2026-11-24: step 7, `previewRefile`: `would refile 0` in every region; the folders that stay
+  are the ones Ryan reviewed (their codes and counts not recorded).
+- 2026-11-24 06:35 UTC: step 8, `Refile` and `RefileList` out of the project (the push of
+  c05dcb9's `Plan.gs`, `Mover.gs`, `appsscript.json`; read back: those three files only);
+  trigger installed again. Every local copy of `RefileList` deleted (none was in `data/`).
+- Live: the re-filing of the Shared Drive's existing photo folders, 2026-11-24 05:17-06:35 UTC,
+  Ryan's go.
