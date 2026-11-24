@@ -65,7 +65,12 @@ What it does and never does:
   nested inside another region's too), a source folder, the Shared Drive's root, anything not
   under a region folder, a photo before its due moment, a folder with anything left in it. To
   keep a photo longer, move it out of the region folders. The dry run (`previewMoves`) trashes
-  nothing and logs what the real run would;
+  nothing and logs what the real run would. The read (#265) lists one folder per Drive call,
+  from the region folders down: the mover's account is no member of the Shared Drive and Drive
+  refuses it any other query. A read too big for one run goes on over the next runs, kept in the
+  Script Properties `RETENTION_STATE_PREVIEW_*` and `RETENTION_STATE_APPLY_*` (the dry run's and
+  the real run's apart; leave them alone), and only the run that completes it plans and trashes;
+  a changed `RETENTION_DAYS` or region folder starts the read again by itself;
 - it never shares, links, copies or e-mails a file, never trashes one in My Drive (only the
   emptied subfolders above), on the Shared Drive only what retention says, and never deletes
   anything for good (no permanent delete, no emptied trash). The photos show girls' faces; only
@@ -81,10 +86,11 @@ What it does and never does:
   | `<Region>: retention 90 days: trashed N file(s) and M folder(s)` | the real run: what went to the trash, the same lines under it |
   | `not trashed "<club subfolder>": N item(s) kept by the re-check` | moved, trashed or re-dated since the read, a folder not empty, or a folder this run moved photos into or one above it: no error, the next run looks again |
   | `RETENTION_CAP: N due file(s) left for the next run` | more than 100 due |
+  | `TIME_BUDGET: retention read not complete (…)` | the read goes on in the next run: nothing planned or trashed this run (RUNBOOK "Photo mover", "Updating the live project (retention, #183)") |
   | `TIME_BUDGET: retention …` | out of time: the rest waits for the next run |
   | `TRASH_FAILED <Region> "<club subfolder>": <error>` | Drive refused a trash; the rest goes on, the run ends with an error |
   | `TRASH_REFUSED <Region>: …` | the plan named a region folder, the root, or something not below its region folder: nothing trashed that run, an error (a bug: stop and look) |
-  | `RETENTION_FAILED <step>: <error>` | a retention read failed: nothing previewed or trashed, an error after the moves |
+  | `RETENTION_FAILED <step>: <error>` | a retention read failed: nothing previewed or trashed, an error after the moves (what was read is kept; the next run tries again) |
 
 Files: `Plan.gs` (the planner, pure, tested by `test/drive_sync_test.js` and, for the partner and
 month layout, `test/drive_sync_layout_test.js`), `Mover.gs` (the entry

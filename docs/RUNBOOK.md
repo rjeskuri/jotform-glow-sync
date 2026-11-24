@@ -1525,6 +1525,61 @@ reason. Undo: move a folder back into the region folder by hand (nothing is rena
 folder in its month folder; the rest goes on, the run ends in an error, look for the folder by
 hand.
 
+**Updating the live project (retention, #183)** (on Ryan's go; the
+[retention plan](plans/2026-10-30-photo-retention.md), Rollout). The retention code (#182, #185,
+#191, #265) goes live with `RETENTION_DAYS` unset and is switched on only after a dry run Ryan
+reads. The account that runs the mover is no member of the Shared Drive (it reaches the region
+folders through folder sharing), so the retention read lists one folder per Drive call (#265),
+from the region folders down, and a big Shared Drive takes several runs to read. Each run reads
+on from where the last one stopped: the progress is in the Script Properties
+`RETENTION_STATE_PREVIEW_*` (`previewMoves`) and `RETENTION_STATE_APPLY_*` (`moveSettledPhotos`),
+kept apart, and is not to be edited. Only the run that completes the read plans, logs `would
+trash` and, on the real run, trashes. Nothing is planned or trashed from a partial read.
+
+1. Ryan: `removeTrigger` (`removeTrigger: 1 trigger(s) deleted; the mover is stopped`).
+2. Claude, on Ryan's go: `clasp pull` of the live project first (the backup, and which commit
+   is live), then main's `drive-sync/Plan.gs` and `Mover.gs` pushed with clasp 2.4.2 on Node 18
+   on the company login (`~/.config/clasp-company/`, not the global login `appsscript/` uses).
+   The manifest is unchanged: no new scope, no new service. Then `clasp pull` again and compare
+   with main. clasp 2.4.2 can print `Pushed N files.` after an error and exit 0 (#225's Result),
+   so the read-back decides. Or Ryan pastes the two files whole.
+3. Ryan: `previewMoves` with `RETENTION_DAYS` unset: `retention off (RETENTION_DAYS not set)`,
+   the moves as before, no `CONFIG refused`.
+4. Ryan: Script Properties → `RETENTION_DAYS` = `90`.
+5. Ryan: `previewMoves`, **repeated while the retention read is unfinished**. A run that has not
+   read the whole tree logs `TIME_BUDGET: retention read not complete (run N of it: F folder(s)
+   listed, L found and not listed yet, K KB kept): nothing planned or trashed this run; the next
+   run reads on`, and no `would trash` line. The next run starts with `retention read: carrying
+   on from the last run (…)`. Each dry run reads for about 4.5 minutes. Run it again until a run
+   logs `retention read complete: N folder(s) listed in R run(s)` and then, per region, `would
+   trash N file(s) and M folder(s)`. That run's log is the plan to read (the plan's Rollout, step
+   4). Nothing on the Shared Drive changes. The dry run's progress is its own: the real run reads
+   afresh.
+6. Ryan: `installTrigger`. The real run reads in the same way, for about 3 minutes a run (it keeps
+   the rest of its budget for the trash). Its first runs log the same `TIME_BUDGET: retention read
+   not complete …` line and trash nothing. The run that completes the read plans and trashes
+   (`trashed N file(s) and M folder(s)`), and the next run starts a new read.
+7. The plan's Result: the dates (UTC), the runs each read took, the counts.
+
+What else a retention line can say:
+
+- `retention read: … changed since the last run`, `… could not be read`, `… began more than 24
+  hours ago`: what was kept is dropped and the read starts again by itself. Nothing to do.
+- `RETENTION_FAILED the read (run N of it, …)`: Drive refused a listing. Nothing is planned or
+  trashed, and the run ends in an error. What was read is kept, and the next run tries that folder
+  again. `The attempted action requires shared drive membership.` there is a bug (every listing
+  names one folder): delete `RETENTION_DAYS` and stop.
+- `RETENTION_FAILED the progress kept for the next run (…): K KB … not kept`: the Script
+  Properties are full (9 KB a value, 500 KB in all, every property counted). An unfinished
+  `previewMoves` read keeps its `RETENTION_STATE_PREVIEW_*` values until a later `previewMoves`
+  completes it. Finish it, or delete those values (Project Settings → Script Properties), never a
+  `SOURCE_`/`TARGET_FOLDER_` one or `RETENTION_DAYS`. If it fails still, the Shared Drive is too
+  big for this read: delete `RETENTION_DAYS` and open a ticket.
+
+Rollback: delete `RETENTION_DAYS` (retention is off from the next run; the `RETENTION_STATE_*`
+values are then unused and may be deleted); the code: the previous `Plan.gs` and `Mover.gs`,
+pushed or pasted back.
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
 A subfolder filed under a partner and month has its target after its name: `would move "<name>"

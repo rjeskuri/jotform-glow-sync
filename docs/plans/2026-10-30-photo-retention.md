@@ -147,15 +147,16 @@ it uses (the hidden question 5 or the Club picker) is #63's Result, not this pla
   follow their files and are not counted against the cap. Ryan: "No there are hundreds of clubs
   in a region, it may need to trash many at once."
 - **R7. Inside the existing runs, after the moves, on what is left of the 4.5-minute budget.** No
-  new trigger, no new entry point, and a failed move does not skip it. The reads, all with
-  `corpora: 'drive'` on that drive: every untrashed folder on the drive in one paged search (every
-  walk up resolves offline, no call per item); one paged search for files with `createdTime` at
-  or before the cutoff (a pre-filter: a file can only be due if its own time is past the
-  cutoff); a full file listing of each folder from `retentionFolders_` (the old folders strictly
-  below a region folder). If the folder list is not complete within the budget, retention is
-  skipped for that run (a missing child folder would make its parent look empty). The cost grows
-  with the folders and the old files on the whole drive: one page per 1,000, plus one listing
-  per old folder under a region.
+  new trigger, no new entry point, and a failed move does not skip it. The reads (revised
+  2026-11-24, #265), all with `corpora: 'drive'` on that drive, go folder by folder from the
+  configured region folders down, each naming one folder (`'<id>' in parents`): the account that
+  runs the mover is no member of the Shared Drive, it reaches the region folders through folder
+  sharing, and Drive refuses it a query without one parent ("The attempted action requires shared
+  drive membership.", #237's dry run). A read too big for one run goes on over the next runs, its
+  progress in the Script Properties, the dry run's and the real run's apart; nothing is planned
+  or trashed before the read is complete (a missing child folder would make its parent look
+  empty). The cost grows with the folders under the region folders: one listing per folder (a
+  page per 1,000 items), nothing outside them read.
 - **R8. The only trash call is #144's helper:** `Drive.Files.update({trashed: true}, id, null,
   {supportsAllDrives: true})`. It refuses any configured folder id and the drive's id. Never
   `files.delete`, `emptyTrash` or DriveApp's `setTrashed`, and no new OAuth scope.
@@ -184,17 +185,20 @@ own copy of every photo: Auto Delete Submissions stays off (BACKLOG 68; proposed
 
 ## Rollout (live; each step on Ryan's go)
 
-Ryan does every step, as the company account, in the `GLOW photo mover` editor: no agent can
-(clasp is logged in as another account, and no agent writes to Drive). First the docs of #183
-(RUNBOOK "Photo mover", the mover plan's dated notes) land on its branch.
+Ryan does every step, as the company account, in the `GLOW photo mover` editor, except the push
+in step 2: Claude pushes with clasp on the company login, on Ryan's go (since #225, 2026-11-23;
+RUNBOOK "Photo mover", "Updating the live project (retention, #183)"). No agent writes to Drive.
+First the docs of #183 (RUNBOOK "Photo mover", the mover plan's dated notes) land on its branch.
 
 1. `removeTrigger`.
-2. Replace the editor's `Plan.gs` and `Mover.gs` with the repo's, whole files; the manifest is
-   unchanged (RUNBOOK "Photo mover", "Updating the live project"). Google may ask to authorise
-   again.
+2. The repo's `Plan.gs` and `Mover.gs` live, whole files: pushed with clasp (a pull before as the
+   backup, a pull after as the read-back) or pasted; the manifest is unchanged (RUNBOOK "Photo
+   mover", "Updating the live project (retention, #183)"). Google may ask to authorise again.
 3. `previewMoves` with `RETENTION_DAYS` unset → `retention off`, moves as before, no
    `CONFIG refused`.
-4. Script Properties: `RETENTION_DAYS` = `90`; then `previewMoves` → per region
+4. Script Properties: `RETENTION_DAYS` = `90`; then `previewMoves`, repeated while its log says
+   `TIME_BUDGET: retention read not complete` (#265: the read takes several runs on a big drive),
+   until a run logs `retention read complete` → per region
    `would trash 0 file(s) …`, no `CONFIG refused`. A count above 0 means something under the
    region folders is already past its due moment (a file sitting directly in a region folder,
    for example): Ryan looks at it in Drive before going on. Anything unexpected: delete
@@ -249,8 +253,7 @@ Then, on or after 2027-01-19 (#184, on hold until then):
 - **`createdTime` not surviving the move** (Context, b): every moved photo would read as new,
   so it would be kept longer, never trashed early. Step 6 checks it by eye.
 - **A folder looking empty because a listing was cut short.** R3 trashes only on a complete
-  listing and a re-list just before; R7 skips retention for a run whose folder list is
-  incomplete.
+  listing and a re-list just before; R7 plans nothing from a read that is not complete.
 - **Many items at once** (a whole region's old folders): the cap of 100 per run (R6) spreads it
   over runs; there is no share refusal (Ryan).
 - **Purge after 30 days.** A wrong trash noticed after 30 days cannot be undone. #184 reads the
@@ -366,6 +369,41 @@ finding, in `drive-sync/Mover.gs`:
   the planner keeps the folder. The dry run is unchanged. `drive-sync/README.md` says so, and its
   re-check list now says each folder above an item is read once per run (PR #190's README
   finding).
+
+**#265 (2026-11-24, `t/265-photos-retention-reads-folder`; offline, nothing live).** Before #183:
+#237's dry run showed that Drive refuses the mover's account any listing of the Shared Drive that
+does not name one folder (it is no member; it reaches the region folders through folder
+sharing), so #182's whole-drive searches could never run live. In `drive-sync/Mover.gs`:
+
+- The read goes folder by folder from the configured region folders down (`readRetention_`): one
+  `'<id>' in parents and trashed = false` listing per folder (ids, types and `createdTime`; no
+  name), followed to its last page, and a region folder's own folders once more by name (the
+  only names the log gives, R14). Nothing outside the region folders is read, so the
+  `outside` line is logged only when its count is not 0 (it is 0 on every run now).
+- A read too big for one run goes on over the next ones. What it keeps: per folder its id, its
+  parent, its `createdTime` and whether it holds something that stays (a file not due within a
+  day, or a region folder), a region subfolder's name; and every file due within a day, by id.
+  That fits a few thousand folders in the Script Properties (about 55 bytes a folder with
+  Drive's 33-character ids), in values of 8,000 ASCII characters under
+  `RETENTION_STATE_PREVIEW_` / `RETENTION_STATE_APPLY_`, the dry run's and the real run's apart;
+  no other property is written. A kept read is dropped and started again when `RETENTION_DAYS`,
+  the drive, a region or a region folder changed, when it cannot be read back in full, or when
+  it began more than a day ago. A kept read the store refuses is `RETENTION_FAILED`.
+- Nothing is planned, logged as `would trash` or trashed from a partial read: such a run logs
+  `TIME_BUDGET: retention read not complete (…)` and ends with no error. A Drive error is
+  `RETENTION_FAILED`; what was listed in full before it is kept, and the next run lists the
+  failed folder again. The run that completes the read plans it with `planTrash_` (unchanged)
+  and deletes what was kept, so the next run starts a new read. The real run reads until 1.5
+  minutes before its budget ends (the rest is for the trash); the dry run for its whole budget.
+- The plan of a tree read in full is unchanged: every folder is handed to `planTrash_`
+  `complete`, the kept files with their own `createdTime`, and one stand-in file of no date in
+  each folder holding something that stays (it keeps that folder and those above it, as what it
+  stands for would).
+- The folders this run's moves went into that no listing showed (#191: Drive's search behind a
+  write) are placed by `Files.get`, walking up to a folder the read knows, and listed too, before
+  the plan. `pathFolderId_` now pushes the partner and month folders it reuses to `movedInto`,
+  not only those it makes, so they are kept that run as well.
+- `sharedDriveOf_` reads each region folder's `createdTime` and parent along with its drive.
 
 ## Result
 
