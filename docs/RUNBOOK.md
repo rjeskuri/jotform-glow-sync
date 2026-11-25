@@ -4306,14 +4306,18 @@ back:
   District (`001RP00000VxX9PYAV`), region U.S: 11 Club accounts, 46 Monthly Reports in 2026.
 - Since #209 every Monthly report on D1-D5 and item 19, the stories table, filters
   `DHIS2__c$Account__c notEqual` the six U.S partners, a locked criteria item beside the test
-  rule. D1-D5 themselves are unchanged; the U.S Monthly Reports of January-October 2026 leave them
-  retroactively.
+  rule. Since #267 six totals reports pair that item, by an OR in their `booleanFilter`, with a
+  locked `DHIS2__c$Period__c lessThan 11/1/2026`, so on those six the U.S Monthly Reports before
+  2026-11-01 count again ("The U.S Monthly Reports through October 2026", below). D1-D5
+  themselves are unchanged; until #267 the U.S Monthly Reports of January-October 2026 left every
+  component retroactively, and since #267 they leave the other Monthly reports only.
 - The three monthly partners' Monthly Reports stay on D1-D5: those partners do report, through
   Salesforce.
 - Item 6 and the attendance-row reports are unchanged by #209, because the U.S has no batches.
 - The SOQL signals in this section equal the dashboards' components only with
   `AND Account__r.Name NOT IN (<the six>)` added to their `WHERE` since #209, because the
-  components leave out the six U.S partners.
+  components leave out the six U.S partners, except the six totals reports, which since #267
+  equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` instead.
 
 Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
 VPN off, after a check-only, on Ryan's go:
@@ -4322,6 +4326,46 @@ VPN off, after a check-only, on Ryan's go:
   `data/sf_us_partners_2026-11-05/before/` only while a fresh retrieve equals `after/`.
 - The copies in Decommissioned (tagged `#209`) are the record of what the reports were, not the
   restore; item 11's metadata copy stays there too.
+- Never from an older build or retrieve. Nothing is deleted.
+
+**The U.S Monthly Reports through October 2026** (#267, Ryan, 2026-11-24/25: the monthly
+dashboards line up with the interactive dashboard; [plan and
+Result](plans/2026-11-25-sf-us-monthly-totals.md); DECISIONS 2026-11-25), deployed 2026-11-25 on
+Ryan's go, "go with sums" (deploy `0AfRP000002l1XN0AY`, check-only `0AfRP000002l1Nh0AI`), and
+read back. Since #267 six totals reports count the six U.S partners' Monthly Reports with
+`Period__c` before 2026-11-01 again, the months the U.S partners were active (their form was
+disabled on 2026-10-06):
+- Overall Attendance by Month (`00ORP000009p0FJ2AY`, D1).
+- Participation by Month and Partner (`00ORP000005rSbB2AU`, item 3).
+- GLOW Club Each Week (`00ORP000005ufOz2AI`, item 4).
+- Club Observations by Month and Partner (`00ORP000004RJZD2A4`, item 10).
+- Number of mentors trained about module (`00ORP000004RJZE2A4`, item 13).
+- Number of training sessions led (`00ORP000004RJZ82AO`, item 14).
+
+The six reports' filter: in each, the locked #209 item `DHIS2__c$Account__c notEqual` the six is
+ORed with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` through
+`booleanFilter` (filter logic), for example `1 AND 2 AND (3 OR 5) AND 4` on Overall Attendance by
+Month (each report's filter logic is in the plan's Result). The other items (the reporting year,
+the account not blank, the account name not containing "test", a report's own) stay ANDed. Their
+SOQL signals equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` added to
+the `WHERE`; on 2026-11-25 Overall Attendance by Month showed 49,976 for January-October 2026,
+the U.S 639 of it, equal to SOQL.
+- Every other Monthly report, the 15 kept on D1-D5 (who reported, what is approved, on time,
+  which clubs or modules) and item 19 (the stories table), keeps the full #209 exclusion.
+- Item 6 (Modules Implemented by Month and Partner, `00ORP000009kUNh2AM`, report type
+  `Attendance_Totals`) is unchanged by #267, with no #209 item, because the U.S has no batches.
+- The three not-submitted lists and the Jotform Attendance dashboard's Partner filter are
+  unchanged by #267: they still leave out the six U.S partners.
+- A U.S Monthly Report for November 2026 or later stays out of every report, the six totals
+  reports too.
+
+Rollback of #267 ([plan](plans/2026-11-25-sf-us-monthly-totals.md#rollback); DECISIONS
+2026-10-16), VPN off, after a check-only, on Ryan's go:
+- The six totals reports are restored by a deploy from a fresh retrieve with the `booleanFilter`
+  and the Period item removed, or from #267's own `data/sf_us_monthly_2026-11-25/before/` only
+  while a fresh retrieve of the six equals `after/`.
+- The copies in Decommissioned (tagged `#267`) are the record of what the reports were, not the
+  restore.
 - Never from an older build or retrieve. Nothing is deleted.
 
 ### Decommissioned
