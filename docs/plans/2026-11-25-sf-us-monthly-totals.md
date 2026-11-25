@@ -1,7 +1,7 @@
 ---
 title: The six U.S partners' Monthly Reports through October 2026 count again on the six totals reports
 author: Claude (ticket #267, with Ryan's request of 2026-11-24/25 and his go of 2026-11-25)
-status: done      # ticket #267; deployed 2026-11-25 02:36 UTC on Ryan's go (deploy 0AfRP000002l1XN0AY, check-only 0AfRP000002l1Nh0AI), read back, checked against SOQL
+status: done      # ticket #267; deployed 2026-11-25 02:36 UTC on Ryan's go, given on the check-only 0AfRP000002kzKH0AY (rerun after the go as 0AfRP000002l1Nh0AI; deploy 0AfRP000002l1XN0AY), read back, checked against SOQL
 done: 2026-11-25
 created: 2026-11-25
 intent: Ryan, 2026-11-24/25 - the monthly dashboards (D1-D5) line up with the interactive dashboard
@@ -14,9 +14,9 @@ the interactive dashboard, so the six U.S partners' Monthly Reports count again 
 they were active, and the Jotform-side reports keep leaving their deactivated clubs out. He took
 both recommendations: the cutoff is through October 2026 (`Period__c` before 2026-11-01), and
 only the totals and trends reports change. Ryan's go, "go with sums", 2026-11-25: the three D1
-attendance reports and items 10, 13 and 14. This amends #209 ([plan](2026-11-05-sf-us-partners.md);
-DECISIONS 2026-11-05) for those six reports. Decision: DECISIONS 2026-11-25. Procedure: RUNBOOK
-"Monthly Report dashboards in Salesforce".
+attendance reports and items 10, 13 and 14 (on the check-only `0AfRP000002kzKH0AY`). This amends
+#209 ([plan](2026-11-05-sf-us-partners.md); DECISIONS 2026-11-05) for those six reports.
+Decision: DECISIONS 2026-11-25. Procedure: RUNBOOK "Monthly Report dashboards in Salesforce".
 
 ## Context
 
@@ -64,29 +64,35 @@ DECISIONS 2026-11-05) for those six reports. Decision: DECISIONS 2026-11-25. Pro
 VPN off (ExpressVPN disconnected, the default route on en0), in the main session; each write on
 Ryan's go.
 
-1. Retrieve live the 32 components (26 reports and 6 dashboards: D1-D5 and Jotform Attendance)
-   into `data/sf_us_monthly_2026-11-25/before/`, the rollback retrieve (2026-11-25, about 00:55
-   UTC); a fresh retrieve of the same 32 at 01:20 UTC into `fresh_0120/` equals `before/` byte
-   for byte.
-2. Build `build/` from `before/` with `make_build.py . --with-sums` (Build, above): 6 reports, 6
+1. The prep, 2026-11-25 00:50-01:15 UTC, read-only: retrieve live the 32 components (26 reports
+   and 6 dashboards: D1-D5 and Jotform Attendance) into `data/sf_us_monthly_2026-11-25/before/`,
+   the rollback retrieve (about 00:55 UTC); build both variants from it and run a check-only
+   (`--dry-run`) of each: the default build (the 3 D1 attendance reports) `0AfRP000002kzLt0AI`,
+   3/3 Succeeded, and `make_build.py . --with-sums` (the 6 reports) `0AfRP000002kzKH0AY`, 6/6
+   Succeeded.
+2. Ryan's go, "go with sums", 2026-11-25 (in the main session, relayed on #267), the answer to
+   the question that offered "go" (the 3 D1 attendance reports, check-only `0AfRP000002kzLt0AI`)
+   or "go with sums" (the 6, check-only `0AfRP000002kzKH0AY`): the 6 reports, the three D1
+   attendance reports and items 10, 13 and 14, on the scope of the earlier go comment (only the
+   totals and trends reports change; the reports that keep the exclusion, item 19, the three
+   not-submitted lists and the Jotform Attendance Partner filter untouched).
+3. After the go, a fresh retrieve of the same 32 at 01:20 UTC into `fresh_0120/`: equal to
+   `before/` byte for byte.
+4. Rebuild `build/` from `before/` with `make_build.py . --with-sums` (Build, above): 6 reports, 6
    members in `build/package.xml`.
-3. Check-only of the build (`--dry-run`): `0AfRP000002l1Nh0AI`, 6/6 Succeeded at 01:21 UTC.
-4. Ryan's go, "go with sums", 2026-11-25 (in the main session, relayed on #267): the 6 reports,
-   the three D1 attendance reports and items 10, 13 and 14, on the scope of the earlier go
-   comment (only the totals and trends reports change; the reports that keep the exclusion, item
-   19, the three not-submitted lists and the Jotform Attendance Partner filter untouched).
-5. Copies into Decommissioned (`00lRP000007iOiXYAU`) before anything changes, 02:33-02:36 UTC,
+5. Check-only of the rebuild (`--dry-run`): `0AfRP000002l1Nh0AI`, 6/6 Succeeded at 01:21 UTC.
+6. Copies into Decommissioned (`00lRP000007iOiXYAU`) before anything changes, 02:33-02:36 UTC,
    once per report, each read back:
    `python3 tools/sf_report_folders.py copy --vpn-off --dir data/sf_us_monthly_2026-11-25/copies --kind report --id <id> --tag "#267" --apply`
-6. Deploy from `build/`: `sf project deploy start -o glow --source-dir
+7. Deploy from `build/`: `sf project deploy start -o glow --source-dir
    data/sf_us_monthly_2026-11-25/build/force-app`, `0AfRP000002l1XN0AY`, 6/6 Succeeded, completed
    02:36:26 UTC.
-7. Read back at 02:37 UTC: the 32 components retrieved into `after/`, and `after/` compared with
+8. Read back at 02:37 UTC: the 32 components retrieved into `after/`, and `after/` compared with
    `build/` for the 6 changed reports (equal byte for byte) and with `before/` for the other 26.
-8. Run the 6 reports through the Analytics API beside SOQL at the same moment (02:38 UTC): each
+9. Run the 6 reports through the Analytics API beside SOQL at the same moment (02:38 UTC): each
    figure equals SOQL with `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)`.
-9. Refresh the dashboards that hold the 6 reports (D1, D3 and D4; PUT, then GET) and read every
-   component's status.
+10. Refresh the dashboards that hold the 6 reports (D1, D3 and D4; PUT, then GET) and read every
+    component's status.
 
 ## Rollback
 
@@ -102,11 +108,17 @@ DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
 ## Result
 
-2026-11-25 01:20-02:42 UTC, each write on Ryan's go through the live gate.
+2026-11-25: the read-only prep 00:50-01:15 UTC, then Ryan's go, then the run 01:20-02:42 UTC,
+each write on that go through the live gate.
 
+- The prep: the rollback retrieve `before/` (about 00:55 UTC) and a check-only of each build,
+  `0AfRP000002kzLt0AI` for the default (the 3 D1 attendance reports, 3/3 Succeeded) and
+  `0AfRP000002kzKH0AY` for `--with-sums` (the 6 reports, 6/6 Succeeded).
+- Ryan's go, "go with sums" (2026-11-25), answered the prep's question on the check-only
+  `0AfRP000002kzKH0AY`, before the run started.
 - Before: the rollback retrieve `before/` holds 6 dashboards (D1-D5 and Jotform Attendance) and
-  26 reports; the fresh retrieve of 01:20 UTC equals it byte for byte.
-- Check-only `0AfRP000002l1Nh0AI`: 6/6 Succeeded (01:21 UTC).
+  26 reports; the fresh retrieve of 01:20 UTC, after the go, equals it byte for byte.
+- Check-only `0AfRP000002l1Nh0AI` of the rebuilt `build/`: 6/6 Succeeded (01:21 UTC).
 - The six copies are in Decommissioned (`00lRP000007iOiXYAU`), tagged `#267`, made 02:33-02:36
   UTC by `tools/sf_report_folders.py copy`, each read back (ledger
   `data/sf_us_monthly_2026-11-25/copies/ledger.csv`).

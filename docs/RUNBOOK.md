@@ -4331,8 +4331,9 @@ VPN off, after a check-only, on Ryan's go:
 **The U.S Monthly Reports through October 2026** (#267, Ryan, 2026-11-24/25: the monthly
 dashboards line up with the interactive dashboard; [plan and
 Result](plans/2026-11-25-sf-us-monthly-totals.md); DECISIONS 2026-11-25), deployed 2026-11-25 on
-Ryan's go, "go with sums" (deploy `0AfRP000002l1XN0AY`, check-only `0AfRP000002l1Nh0AI`), and
-read back. Since #267 six totals reports count the six U.S partners' Monthly Reports with
+Ryan's go, "go with sums", given on the prep's check-only `0AfRP000002kzKH0AY` (after the go a
+fresh retrieve, the check-only `0AfRP000002l1Nh0AI`, then deploy `0AfRP000002l1XN0AY`), and read
+back. Since #267 six totals reports count the six U.S partners' Monthly Reports with
 `Period__c` before 2026-11-01 again, the months the U.S partners were active (their form was
 disabled on 2026-10-06):
 - Overall Attendance by Month (`00ORP000009p0FJ2AY`, D1).
