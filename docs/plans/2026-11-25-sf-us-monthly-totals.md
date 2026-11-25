@@ -64,12 +64,13 @@ Decision: DECISIONS 2026-11-25. Procedure: RUNBOOK "Monthly Report dashboards in
 VPN off (ExpressVPN disconnected, the default route on en0), in the main session; each write on
 Ryan's go.
 
-1. The prep, 2026-11-25 00:50-01:15 UTC, read-only: retrieve live the 32 components (26 reports
-   and 6 dashboards: D1-D5 and Jotform Attendance) into `data/sf_us_monthly_2026-11-25/before/`,
-   the rollback retrieve (about 00:55 UTC); build both variants from it and run a check-only
-   (`--dry-run`) of each: the default build (the 3 D1 attendance reports) `0AfRP000002kzLt0AI`,
-   3/3 Succeeded, and `make_build.py . --with-sums` (the 6 reports) `0AfRP000002kzKH0AY`, 6/6
-   Succeeded.
+1. The prep, from 2026-11-24 15:49 UTC to 2026-11-25 01:15 UTC, read-only: retrieve live the 32
+   components (26 reports and 6 dashboards: D1-D5 and Jotform Attendance) into
+   `data/sf_us_monthly_2026-11-25/before/`, the rollback retrieve (2026-11-24 15:49 UTC, 2026-11-25
+   00:49 JST); build both variants from it and run a check-only (`--dry-run`) of each at 15:53 UTC:
+   the default build (the 3 D1 attendance reports) `0AfRP000002kzLt0AI`, 3/3 Succeeded, and
+   `make_build.py . --with-sums` (the 6 reports) `0AfRP000002kzKH0AY`, 6/6 Succeeded; the prep's
+   evidence written 2026-11-25 01:15 UTC.
 2. Ryan's go, "go with sums", 2026-11-25 (in the main session, relayed on #267), the answer to
    the question that offered "go" (the 3 D1 attendance reports, check-only `0AfRP000002kzLt0AI`)
    or "go with sums" (the 6, check-only `0AfRP000002kzKH0AY`): the 6 reports, the three D1
@@ -108,12 +109,13 @@ DECISIONS 2026-10-16, each write on Ryan's go after a check-only, VPN off.
 
 ## Result
 
-2026-11-25: the read-only prep 00:50-01:15 UTC, then Ryan's go, then the run 01:20-02:42 UTC,
-each write on that go through the live gate.
+The read-only prep from 2026-11-24 15:49 UTC to 2026-11-25 01:15 UTC, then Ryan's go, then the
+run 2026-11-25 01:20-02:42 UTC, each write on that go through the live gate.
 
-- The prep: the rollback retrieve `before/` (about 00:55 UTC) and a check-only of each build,
-  `0AfRP000002kzLt0AI` for the default (the 3 D1 attendance reports, 3/3 Succeeded) and
-  `0AfRP000002kzKH0AY` for `--with-sums` (the 6 reports, 6/6 Succeeded).
+- The prep: the rollback retrieve `before/` (2026-11-24 15:49 UTC, 2026-11-25 00:49 JST) and a
+  check-only of each build at 15:53 UTC, `0AfRP000002kzLt0AI` for the default (the 3 D1
+  attendance reports, 3/3 Succeeded) and `0AfRP000002kzKH0AY` for `--with-sums` (the 6 reports,
+  6/6 Succeeded); its evidence written 2026-11-25 01:15 UTC.
 - Ryan's go, "go with sums" (2026-11-25), answered the prep's question on the check-only
   `0AfRP000002kzKH0AY`, before the run started.
 - Before: the rollback retrieve `before/` holds 6 dashboards (D1-D5 and Jotform Attendance) and
