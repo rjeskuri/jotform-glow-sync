@@ -937,6 +937,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The filters match the partner accounts by name, so a renamed U.S account drops out of the filters and comes back silently on every dashboard and list, until the filter values are renamed with it.
   - A newly inactive partner, or another partner that stops reporting through Jotform, is a new ticket: a fresh retrieve, the filter values edited, check-only, Ryan's go, deploy.
   - The U.S partners stay in `glow/sf_partners.csv` and in Salesforce; only the reports and the dashboard filter leave them out.
+- 2026-11-25: amended by #267 (the 2026-11-25 entry below): six totals reports on D1, D3 and D4 count the U.S Monthly Reports through October 2026 again; every other Monthly report, item 19, the three not-submitted lists and the Partner filter keep this exclusion.
 
 ### 2026-10-26 — Backed-up live writes go through without a prompt
 
@@ -1000,3 +1001,14 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The existing folders keep their names: no renaming of old folders or files, and no follow-up ticket for it (Ryan, 2026-11-23).
   - Ryan reviews `previewRefile`'s log before the real run; what stays is moved by hand or left.
   - Plan: `docs/plans/2026-11-23-refile-photo-folders.md` (Rollout, Rollback, Result).
+
+### 2026-11-25 — The six totals reports count the U.S partners' Monthly Reports through October 2026 (#267)
+
+- Since #267 six totals reports on D1, D3 and D4 count the six U.S partners' Monthly Reports with `Period__c` before 2026-11-01 (through October 2026) again: Overall Attendance by Month, Participation by Month and Partner (item 3), GLOW Club Each Week (item 4), Club Observations by Month and Partner (item 10), Number of mentors trained about module (item 13) and Number of training sessions led (item 14). In each, #209's locked `DHIS2__c$Account__c notEqual` item is ORed through `booleanFilter` with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` (deploy `0AfRP000002l1XN0AY`, 2026-11-25, on Ryan's go "go with sums"; [plan](plans/2026-11-25-sf-us-monthly-totals.md); RUNBOOK "Monthly Report dashboards in Salesforce").
+- This amends 2026-11-05 (#209) for those six reports only. The reports of who reported, what is approved, on time, and which clubs or modules, and the stories table (item 19), keep the full #209 exclusion, and so do the three not-submitted lists and the Jotform Attendance dashboard's Partner filter.
+- **Why:** Ryan, 2026-11-24/25: the monthly dashboards (D1-D5) should line up with the interactive dashboard, which has no filters. The gap between them, January-October 2026, was exactly the six U.S partners' `Monthly_Total__c` (639), and Ryan took both recommendations: a cutoff through October 2026, and only the totals and trends reports changed.
+- **Rejected:** counting the U.S on every Monthly report, item 19 and the approval and on-time reports too: those track who reported and what is approved, where #209's reason (inactive partners distorting the figures) still holds; counting the U.S Monthly Reports with no cutoff (every month, November 2026 on): the U.S form was disabled on 2026-10-06, so the U.S partners have no active months after October.
+- **Consequences:**
+  - A U.S Monthly Report for November 2026 or later stays out of every report, the six totals reports too.
+  - The kept reports keep the #209 exclusion in every month, so for January-October 2026 a totals report and a who-reported or approval report on the same dashboard count different partners.
+  - The six reports' filters still match the U.S partners by name (2026-11-05); a change to them is a new ticket from a fresh retrieve.

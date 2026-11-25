@@ -13,6 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-25 | The six U.S partners' Monthly Reports through October 2026 count again on the six totals reports | done 2026-11-25 |  | [2026-11-25-sf-us-monthly-totals.md](2026-11-25-sf-us-monthly-totals.md) |
 | 2026-11-23 | The photo folders already on the Shared Drive re-filed once under Region / Partner / Month | done 2026-11-24 |  | [2026-11-23-refile-photo-folders.md](2026-11-23-refile-photo-folders.md) |
 | 2026-11-23 | Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker | done 2026-11-23 |  | [2026-11-23-partner-fill.md](2026-11-23-partner-fill.md) |
 | 2026-11-19 | Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name | in-progress |  | [2026-11-19-photo-folders-partner-month.md](2026-11-19-photo-folders-partner-month.md) |
