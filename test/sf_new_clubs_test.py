@@ -299,6 +299,8 @@ class SalesforceNewClubs(Fixture):
                                         "Description": "GLOW club code DAWNCLUB; created by the automatic sync 2026-10-07"}])
         self.assertEqual(len(s.created), 1)
         self.assertTrue(any("check it by hand" in t for t, _ in s.attention) == sfn.CONFIRM_CREATES)
+        # a clean create raises nothing else: any ATTENTION item turns the auto-sync run red (exit 2)
+        self.assertEqual(len(s.attention), 1 if sfn.CONFIRM_CREATES else 0)
         # the next run finds it right: nothing more to create, the check is clean
         s2 = self.step(org)
         self.assertTrue(s2.prepare())

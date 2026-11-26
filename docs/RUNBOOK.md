@@ -2804,7 +2804,7 @@ when nothing matches it creates a new, partner-less Club account.
   - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
   - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
   - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
-  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
+  - 2026-11-26: the first 20 automatic creates (2026-10-23 to 2026-11-26) checked by hand: each a Club account under its partner, Description `created by the automatic sync <date>`, one account per name. `CONFIRM_CREATES` has been off since then: a create is a log line, not an ATTENTION item.
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2919,7 +2919,7 @@ or a command line.
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
 | `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
-| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
+| `created … check it by hand (first creates)` | Off since 2026-11-26 (`CONFIRM_CREATES` in `tools/sf_new_clubs.py`); only if it is turned on again | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
 | `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
