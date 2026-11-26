@@ -1,7 +1,8 @@
 ---
 title: Salesforce club accounts created automatically for new clubs (BACKLOG 27)
 author: Claude (with Ryan)
-status: done      # 2026-11-26: the first automatic creates checked by hand, CONFIRM_CREATES off; accepted by Ryan 2026-10-06; built 2026-10-07 and in main; 2026-10-21: the sync runs as Ryan's own user; 2026-10-22: secrets set, SF_SYNC=plan 12:31 UTC then apply 12:52 UTC (Ryan's go); done when the first automatic creates are checked by hand (BACKLOG 27, ticket #66)
+status: done      # accepted by Ryan 2026-10-06; built 2026-10-07; live in apply since 2026-10-22 (Ryan's go); done 2026-11-26: the first automatic creates checked by hand, CONFIRM_CREATES off (BACKLOG 27, ticket #66)
+done: 2026-11-26
 backlog: 27
 created: 2026-10-06
 intent: none - Ryan's request of 2026-10-06 ("look at doing the salesforce clubs records automatically")

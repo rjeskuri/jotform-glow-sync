@@ -2804,7 +2804,7 @@ when nothing matches it creates a new, partner-less Club account.
   - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
   - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
   - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
-  - 2026-11-26: the first 20 automatic creates (2026-10-23 to 2026-11-26) checked by hand: each a Club account under its partner, Description `created by the automatic sync <date>`, one account per name. `CONFIRM_CREATES` is off since: a create is a log line, not an ATTENTION item.
+  - 2026-11-26: the first 20 automatic creates (2026-10-23 to 2026-11-26) checked by hand: each a Club account under its partner, Description `created by the automatic sync <date>`, one account per name. `CONFIRM_CREATES` has been off since then: a create is a log line, not an ATTENTION item.
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
