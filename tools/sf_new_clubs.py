@@ -50,7 +50,8 @@ SF_PENDING_TAB = "SF Pending"
 # a copy of appsscript/FormHandlers.gs SF_PENDING_COLS (test/sf_new_clubs_test.py compares them)
 SF_PENDING_COLS = ["added", "partner", "club", "region", "girls", "mentor_name", "mentor_email", "country",
                    "status", "notes"]
-CONFIRM_CREATES = True      # each create also raises "created, check by hand" (plan step 6; off later)
+CONFIRM_CREATES = False     # True: each create also raises "created, check by hand" (plan step 6;
+                            # off since 2026-11-26: the first 20 creates were checked and right)
 CODE_IN = re.compile(r"GLOW club code ([A-Z0-9]+);")
 GIRL_ID = re.compile(r"([A-Z0-9]+)-[A-Z0-9]+-\d+")              # CLUBCODE-LASTCODE-NNN (appsscript/Ids.gs)
 PROVEN = set(" -.()'/")     # characters seen arriving intact in question 5 (600 batches, 2026-10-06)
