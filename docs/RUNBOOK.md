@@ -4086,6 +4086,28 @@ login `glow` or the read-only connector; counts and partner names only):
   Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
   Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
 
+**Club-level attendance for photo checks** (#226; not among the four timing reports above):
+
+- `Girls_Present_by_Club_and_Week` ("Girls Present by Club and Week", `00ORP000009tUjR2AU`, a
+  matrix on `Attendance_Totals`, standalone, not on the dashboard; #226, 2026-11-19) is the report
+  for checking mentors' photos against attendance: rows partner then club, columns the session
+  week, each cell the sum of `Girls_Present__c` of the week's Jotform sessions (`Creator__c`
+  starts with `Jotform`, `Processing_Status__c` `Success`; partner reports left out). A girl at
+  two sessions in a week counts twice. Show Details lists each session: batch, session date,
+  module and module week. Its date filters (default `N_WEEKS_AGO:8` to `THIS_WEEK`) and Region
+  (`Account__c.Partner_Region__c`), Partner and Club (`contains`) are unlocked: any viewer changes
+  them in the Filters panel. A matrix takes two row groupings, so Region is a filter, not a row.
+  Check (sum per club and week in a script; `Session_Week__c` is a formula SOQL cannot group):
+  `SELECT Account__r.Parent.Name, Account__r.Name, Session_Week__c, Girls_Present__c FROM
+  Attendance_Batch__c WHERE
+  Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >=
+  N_WEEKS_AGO:8 AND Attendance_Date__c <= THIS_WEEK`. ([plan](plans/2026-11-19-sf-club-week-girls.md))
+- "Attendance By Club By Date" (`Attendance_By_Club_By_Week_Wdl`, `00ORP000007uBRN2A2`, a summary
+  on `Accounts_Contacts_Attendance`) lists each girl's attendance by club and date. Since #226
+  (2026-11-18) its Region, Partner and Club filters (`contains`) are unlocked for any viewer, and
+  its date range is the attendance date, last 90 days by default (until then the club account's
+  created date, this year).
+
 Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
 (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
 above are the first try. When SOQL refuses one, the check that the plan's Task #102 Rollout step 7 runs is
