@@ -1,0 +1,19 @@
+{
+  "about": "The attendance processor's Apex as we deployed it: tools/auto_sync.py compares each run's read of these components with these digests (glow/salesforce.py apex_attention; docs/RUNBOOK.md, \"Attendance processor watch\"). sha256 of the body, CRLF -> LF, trimmed (apex_fingerprint), written in groups of 8 hex digits: 64 in a row is what scripts/check_secrets.py refuses as a secret.",
+  "recorded": "2026-11-20, ticket #242. The two classes from the retrieve after deploy 0AfRP000002kdV30AI (2026-11-19 14:39:11 UTC, ticket #238; equal to the build); the trigger from that day's retrieve before it (not in that deploy nor in the 2026-10-26 release; live since 2026-10-24).",
+  "refresh": "After any deploy of ours that changes one of these: retrieve the deployed component (VPN off), then, in the repository root, python3 -c 'import sys; from glow.salesforce import apex_fingerprint as f; d = f(open(sys.argv[1], encoding=\"utf-8\").read()); print(*(d[i:i + 8] for i in range(0, 64, 8)))' <file>; put the digest here, update `recorded`, and commit it with the deploy's plan.",
+  "components": {
+    "AttendanceBatchProcessor": {
+      "kind": "ApexClass",
+      "sha256": "f35c64ba 1b6166c3 55be24e5 e926c959 26c32f7e 5d298f7c 94989ff4 dd8f1cf3"
+    },
+    "AttendanceBatchTrigger": {
+      "kind": "ApexTrigger",
+      "sha256": "b675913d bc697002 3ab4ac35 97e8fff1 7e95443f 8cf870cb 373d59ba 8ba8dc04"
+    },
+    "AttendanceBatchTriggerTest": {
+      "kind": "ApexClass",
+      "sha256": "d81ac9da e9f2f787 ac8cf4c6 dd5123b9 4986eff2 64a8f0b3 35aef43b dd1425d8"
+    }
+  }
+}

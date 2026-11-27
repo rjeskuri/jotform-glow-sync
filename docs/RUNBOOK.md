@@ -63,6 +63,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
   - [Back-fill of attendance into Salesforce](#back-fill-of-attendance-into-salesforce)
+  - [Attendance processor watch](#attendance-processor-watch)
 - [Admin and work log](#admin-and-work-log)
   - [Credentials](#credentials)
   - [Live gate (Claude Code)](#live-gate-claude-code)
@@ -207,7 +208,10 @@ accounts, automatically"). It is one more SyncLog row, region `Salesforce`; its 
 ATTENTION items starting `SF:`. The end-of-run check reports a partner-less stray account
 only when every regional form's names were read, and a region whose form is disabled
 (`skipped`) counts as read: its clubs keep their accounts, under their partner, so they are
-not strays (a `failed` region does not count, and no stray is reported that run).
+not strays (a `failed` region does not count, and no stray is reported that run). With the same
+login the run also watches the attendance processor: an `SF:` ATTENTION item when its Apex is
+not the build we deployed, or when no Jotform batch has arrived for 48 hours on a weekday
+("Attendance processor watch").
 
 **Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
 `--max-retires`, `--max-restores`):
@@ -6013,6 +6017,72 @@ they are (history); a failed batch is never copied twice.
   rows), then the copies (`batch_id` in `resend_ledger.csv`); set each original's
   `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
   `close <failed id> --removed` for each.
+
+## Attendance processor watch
+
+- **When:** an ATTENTION item from the automatic sync starting `SF: the Apex class`, `SF: the
+  Apex trigger`, `SF: no Jotform attendance batch` or `SF: the processor watch could not check`;
+  after any deploy of ours that changes a watched component (refresh the fingerprints).
+- **Status:** built 2026-11-20 (#242), after incident #238; runs whenever the Salesforce step
+  logs in (`SF_SYNC` `plan` or `apply`, with the secrets; nothing at `off`).
+- **Dry run:** none needed: the watch only reads.
+- **Apply:** nothing to apply; what each alert asks for is below.
+- **Verify:** the run's `SF: watch - Apex: ok` and `SF: watch - batches: ok` log lines.
+- **Rollback:** none (reads only); `SF_SYNC=off` stops it with the rest of the Salesforce step.
+
+On 2026-10-26 another team's release overwrote `AttendanceBatchProcessor` and its test class in
+production, and nobody noticed for 3½ weeks (#238; its plan:
+`docs/plans/2026-11-19-processor-restore.md`). Every run with a Salesforce login now reads, as
+GLOW Sync, `Name, Body, LastModifiedDate, LastModifiedById` of `AttendanceBatchProcessor` and
+`AttendanceBatchTriggerTest` (ApexClass) and `AttendanceBatchTrigger` (ApexTrigger), no
+namespace, and compares the sha256 of each body (CRLF → LF, trimmed) with
+`glow/apex_fingerprints.json`, which records our build: deploy `0AfRP000002kdV30AI`, 2026-11-19.
+It also reads the newest `Attendance_Batch__c` whose `Creator__c` starts with `Jotform`. Each
+finding is one ATTENTION item (the run exits 2); the log line `SF: watch - …` gives counts only,
+never a body, and an item names the component, its LastModifiedDate and the modifier's user id
+(an id, never a name: look it up in Setup → Users).
+
+**A component changed** (`SF: the Apex class … has changed in Salesforce`):
+1. Retrieve the live class or trigger into a work folder outside `main`'s `data/` (VPN off):
+   `sf project retrieve start -o glow -m ApexClass:<name> --target-dir <folder>` (`ApexTrigger:`
+   for the trigger).
+2. Compare it with our build: the last deploy of ours (#238's work folder, `after/`) or the
+   fingerprint, `apex_fingerprint` in `glow/salesforce.py`, of the retrieved file against the
+   JSON.
+3. Ask who changed it and why: the modifier's user id names the user in Setup; Ryan asks the
+   vendor (#238: another team's release). Nothing is redeployed before Ryan decides.
+4. To put ours back: #238's plan, `docs/plans/2026-11-19-processor-restore.md` (Rollout:
+   retrieve `before/`, build, check-only, Ryan's go, quick deploy, retrieve `after/` and compare;
+   then the re-send and `Girls_Present__c` steps if batches were processed by the other version).
+5. If the change is ours or accepted: refresh the fingerprints (next paragraph).
+
+**A component missing** (`… is not in Salesforce`): as above; check first that it was not renamed
+or moved into a namespace (a package). Without the trigger no batch is processed at all.
+
+**A body that could not be read** (`… could not read the body`): the runner's user cannot read
+Apex source. GLOW Sync runs as Ryan's own user (an administrator), which should read it; the
+permission needed is API access to `ApexClass` / `ApexTrigger` with their `Body`, typically View
+Setup and Configuration, possibly Author Apex - unverified until the first run reads it. If the
+Run As user changes, give it that permission rather than turning the watch off.
+
+**No Jotform batch for over 48 hours** (`SF: no Jotform attendance batch for over 48 hours`):
+judged on a weekday (UTC) only; clubs also meet at weekends, so a quiet Friday to Monday is
+itself worth a look.
+1. `python3 tools/integration_status.py`: is every live form's Salesforce integration in place?
+2. Is Ryan's user frozen (#238's part B: a VPN froze it, every token was revoked, Jotform's
+   included)? Another administrator unfreezes it; Ryan re-authorises the Jotform connection on
+   each live form, then `integration_status.py` again.
+3. Back-fill what was missed: "Back-fill of attendance into Salesforce", with the window set
+   (`tools/backfill_resolve.py --since … --month-start …`, as #238 did).
+
+**The watch could not check** (`SF: the processor watch could not check the …`): the read itself
+failed (the detail says why: an HTTP status, a refused login). One run: wait for the next; every
+run: as for a gap, the login and the user first.
+
+**Refresh the fingerprints** after any deploy of ours that changes a watched component: retrieve
+the deployed component and follow the `refresh` entry in `glow/apex_fingerprints.json` (the
+digest of the retrieved file, written in groups of 8 hex digits), update its `recorded` line, and
+commit it with the deploy's plan. Never commit the retrieved Apex itself.
 
 # Admin and work log
 

@@ -17,10 +17,15 @@ accounts on hold; how the attendance processor compares a submitted club name wi
 (sf_match); the groups of Accounts the Account duplicate rule reports (duplicate_account_groups);
 the characters no name may hide (has_invisible); the error codes of an answer, never its words
 (error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools' --vpn-off
-(add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py.
+(add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py. And what the
+automatic runner watches (#242, after incident #238): the attendance processor's Apex against the
+build we deployed (apex_fingerprint, expected_apex from glow/apex_fingerprints.json,
+apex_attention) and Jotform batches that stop arriving (batch_gap_attention).
 """
 import argparse
 import csv
+import datetime
+import hashlib
 import json
 import os
 import re
@@ -358,3 +363,115 @@ def read_partners(path=PARTNERS):
                               f"no plain account id: {row['partner']!r}")
             out[k] = (pid, name)
     return out
+
+
+# ---- the runner's watch on the attendance processor (#242, after incident #238) -------------------
+# Another team's release overwrote the processor on 2026-10-26 and nobody noticed for 3 1/2 weeks:
+# each run with a Salesforce login compares the watched Apex with the build we deployed, and says
+# when no Jotform batch has arrived for two days (docs/RUNBOOK.md, "Attendance processor watch").
+FINGERPRINTS = os.path.join(REPO, "glow", "apex_fingerprints.json")
+APEX_KINDS = {"ApexClass": "class", "ApexTrigger": "trigger"}
+SHA256 = re.compile(r"[0-9a-f]{64}")
+# the newest batch the Jotform flow made (Creator__c `Jotform`; the back-fill's `Jotform back-fill`
+# too); a partner's report or a batch made by hand does not count
+NEWEST_JOTFORM_BATCH = ("SELECT Id, CreatedDate FROM Attendance_Batch__c WHERE Creator__c LIKE 'Jotform%' "
+                        "ORDER BY CreatedDate DESC LIMIT 1")
+WATCH_SECTION = 'docs/RUNBOOK.md, "Attendance processor watch"'
+
+
+def apex_fingerprint(body):
+    """The sha256 (hex) of an Apex body, normalised: CRLF -> LF, surrounding whitespace trimmed, UTF-8."""
+    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+
+
+def expected_apex(path=FINGERPRINTS):
+    """{name: {"kind": "ApexClass" | "ApexTrigger", "sha256": hex}}: the build we deployed, from
+    glow/apex_fingerprints.json (its `recorded` and `refresh` say where the digests came from and
+    how to renew them after a deploy of ours). The file writes each digest in groups of 8 hex
+    digits (64 in a row is a secret to scripts/check_secrets.py); here they are joined."""
+    rel = os.path.relpath(path, REPO)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            components = json.load(fh)["components"]
+        out = {name: {"kind": c["kind"], "sha256": "".join(c["sha256"].split())} for name, c in components.items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as err:
+        raise Refused(f"{rel} could not be read ({err.__class__.__name__}): restore it from git") from None
+    for name, c in out.items():
+        if c["kind"] not in APEX_KINDS or not isinstance(c["sha256"], str) or not SHA256.fullmatch(c["sha256"]):
+            raise Refused(f"{rel}: {name} needs a kind (ApexClass or ApexTrigger) and a sha256")
+    return out
+
+
+def sf_moment(text):
+    """A Salesforce datetime ('2026-10-26T14:03:11.000+0000') as an aware UTC datetime, else None."""
+    for shape in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            return datetime.datetime.strptime(str(text or ""), shape).astimezone(datetime.timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def utc_text(when):
+    return when.strftime("%Y-%m-%d %H:%M UTC") if when else "an unreadable date"
+
+
+def apex_attention(org, expected=None):
+    """ATTENTION items, (title, detail), for each watched Apex component whose body in the org is
+    not the build recorded in `expected` (default: expected_apex(), read at call time): changed,
+    missing, or a body that could not be read. Each item names its component, the LastModifiedDate
+    and the modifier's user id - never a name, never a line of the body. Reads only."""
+    if expected is None:
+        expected = expected_apex()
+    items = []
+    for kind, word in APEX_KINDS.items():
+        names = sorted(n for n, c in expected.items() if c["kind"] == kind)
+        if not names:
+            continue
+        found = {}
+        for r in org.query(f"SELECT Id, Name, Body, LastModifiedDate, LastModifiedById FROM {kind} "
+                           f"WHERE NamespacePrefix = null AND Name IN ({', '.join(quoted(n) for n in names)})"):
+            found.setdefault(r.get("Name"), r)
+        for name in names:
+            r = found.get(name)
+            if r is None:
+                items.append((f"SF: the Apex {word} {name} is not in Salesforce",
+                              f"The runner found no {kind} named {name} (no namespace): attendance from "
+                              f"Jotform may not be processed at all. Incident #238; {WATCH_SECTION}."))
+                continue
+            who = str(r.get("LastModifiedById") or "")
+            who = who if SF_ID.fullmatch(who) else "an unreadable id"
+            changed = f"Last modified {utc_text(sf_moment(r.get('LastModifiedDate')))} by user {who}."
+            body = r.get("Body")
+            if not isinstance(body, str) or not body.strip() or body.strip() == "(hidden)":
+                items.append((f"SF: the Apex {word} {name}: could not read the body",
+                              f"Salesforce answered no body for it, so it could not be compared with "
+                              f"glow/apex_fingerprints.json. {changed} The runner's user may lack the "
+                              f"permission to read Apex; {WATCH_SECTION}."))
+            elif apex_fingerprint(body) != expected[name]["sha256"]:
+                items.append((f"SF: the Apex {word} {name} has changed in Salesforce",
+                              f"Its body is not the build recorded in glow/apex_fingerprints.json. {changed} "
+                              f"Another team's release overwrote the attendance processor on 2026-10-26 "
+                              f"unnoticed (#238): find out who changed it and why before anything else; "
+                              f"{WATCH_SECTION}."))
+    return items
+
+
+def batch_gap_attention(org, now, hours=48):
+    """[(title, detail)] when, on a weekday (UTC), the newest Jotform batch is older than `hours`
+    or there is none; [] otherwise. Exactly `hours` old is not yet a gap. Reads only."""
+    now = now.astimezone(datetime.timezone.utc)
+    if now.weekday() >= 5:
+        return []
+    records = org.query(NEWEST_JOTFORM_BATCH)
+    newest = sf_moment(records[0].get("CreatedDate")) if records else None
+    if records and newest is None:
+        raise Refused("the newest Jotform batch has no readable CreatedDate")
+    if newest is not None and now - newest <= datetime.timedelta(hours=hours):
+        return []
+    since = (f"The newest batch created by Jotform is from {utc_text(newest)}, "
+             f"{(now - newest).total_seconds() / 3600:.0f} hours before this run."
+             if newest else "Salesforce has no batch created by Jotform at all.")
+    return [(f"SF: no Jotform attendance batch for over {hours} hours",
+             f"{since} Submissions may not be reaching Salesforce (a frozen user, a Jotform connection "
+             f"that needs re-authorising): run tools/integration_status.py; {WATCH_SECTION}.")]
