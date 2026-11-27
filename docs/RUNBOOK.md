@@ -3545,7 +3545,8 @@ only the tile is gone, and the two tiles beside it are 6 columns wide
 
 **Submission timing** (#103, epic #93 item 2; Ryan's answers of 2026-10-26 on the ticket;
 [plan](plans/2026-10-23-submission-timing.md#task-103-the-timing-on-the-dashboard); built
-2026-11-20 in `data/sf_session_timing_2026-11-19/`, to deploy on Ryan's go): four components on
+2026-11-20 in `data/sf_session_timing_2026-11-19/`, deployed 2026-11-20 03:06 UTC on Ryan's go,
+`0AfRP000002khIX0AY`): four components on
 three of #102's reports ("Submission timing in Salesforce", The timing reports), in two rows below
 the club-by-date table, and the timing in the "How to read this dashboard" box below them.
 - The metric "Clubs not submitting", labelled "last week", reads `Clubs_Not_Submitting_Last_Week`:
@@ -4006,7 +4007,7 @@ prompt; with `?filter1=` in the path it is judged as a write): `sf api request r
   reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
   timing reports of task #102 are deployed since 2026-10-26 12:34 UTC (#157, deploy
   `0AfRP000002i9xh0AA`; "The timing reports", below). Task #103 puts three of them on the Jotform
-  Attendance dashboard: built 2026-11-20, not deployed yet ("Attendance dashboard in Salesforce",
+  Attendance dashboard: deployed 2026-11-20 03:06 UTC (`0AfRP000002khIX0AY`, "Attendance dashboard in Salesforce",
   Submission timing).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.

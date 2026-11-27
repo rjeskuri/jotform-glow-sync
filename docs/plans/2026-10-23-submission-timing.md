@@ -1,7 +1,8 @@
 ---
 title: Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them
 author: Claude (with Ryan's answers of 2026-10-22)
-status: in-progress    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 put them on the dashboard: deployed 2026-11-20 03:06 UTC ("Task #103: the timing on the dashboard")
+status: done    # ticket #101 done 2026-10-24 (the four fields live, the check OK: Result); ticket #102's four reports deployed 2026-10-26 (#157, "Task #102: the timing reports", Result); task #103 put them on the dashboard: deployed 2026-11-20 03:06 UTC ("Task #103: the timing on the dashboard")
+done: 2026-11-20
 created: 2026-10-23
 intent: Ryan, 2026-10-22 (GLOW staff meeting, epic #93) - bring into Salesforce "the time the Jotform form was submitted AND which month/week the session belongs to (e.g. week 2, week 3), displayable in reports, so upper-level staff can see which clubs haven't submitted for a week, or have a big delay between session and submission"
 ---
