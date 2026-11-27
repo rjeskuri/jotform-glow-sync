@@ -138,21 +138,59 @@ class Paths:
                                lambda row: marker(row, MERGE_CREATOR), removed_again=True)
 
 # ---- snapshot ------------------------------------------------------------------------------------
+AGGREGATE_ROWS = 2000    # the most groups Salesforce answers to one aggregate query: it cannot page one
 STATE_QUERIES = {
     "accounts": "SELECT Id, Name, RecordTypeId, ParentId FROM Account ORDER BY Id",
     "batches": "SELECT Id, Name, Account__c, Attendance_Date__c, Processing_Status__c "
                "FROM Attendance_Batch__c ORDER BY CreatedDate",
-    "attendance": "SELECT Account__c, Attendance_Date__c, COUNT(Id) n FROM Attendance__c "
+    # club x day passed AGGREGATE_ROWS (2026-11-27): read one window of attendance_windows() at a time
+    "attendance": "SELECT Account__c, Attendance_Date__c, COUNT(Id) n FROM Attendance__c WHERE {window} "
                   "GROUP BY Account__c, Attendance_Date__c",
     "participants": "SELECT AccountId, COUNT(Id) n FROM Contact WHERE Contact_Role__c = 'Participant' "
                     "GROUP BY AccountId",
 }
+ATTENDANCE_SPAN = "SELECT MIN(Attendance_Date__c) lo, MAX(Attendance_Date__c) hi FROM Attendance__c"
+
+
+def aggregate(org, soql):
+    """An aggregate query's answer. One of AGGREGATE_ROWS groups or more is refused: Salesforce answers no
+    more in one (EXCEEDED_ID_LIMIT above it), so an answer that size may be cut short."""
+    found = plain(org.query(soql))
+    if len(found) >= AGGREGATE_ROWS:
+        raise Refused(f"Salesforce answered {len(found)} groups to one read, the most it answers at once, so it "
+                      f"may be cut short - nothing written; this read needs smaller windows: {soql[:90]}")
+    return found
+
+
+def attendance_windows(org):
+    """The WHERE of each attendance read: every calendar month from the first Attendance_Date__c to the
+    last, then the rows without a date."""
+    span = plain(org.query(ATTENDANCE_SPAN))
+    if len(span) != 1:
+        raise Refused(f"Salesforce answered {len(span)} rows to the attendance span read - nothing written")
+    lo, hi = span[0].get("lo"), span[0].get("hi")
+    windows = []
+    if lo is not None or hi is not None:
+        first, last = iso(lo), iso(hi)
+        if first is None or last is None or first > last:
+            raise Refused("Salesforce gave the first and last attendance dates in a shape this tool does not "
+                          "know - nothing written")
+        month = first.replace(day=1)
+        while month <= last:
+            after = (month + datetime.timedelta(days=31)).replace(day=1)
+            windows.append(f"Attendance_Date__c >= {month} AND Attendance_Date__c < {after}")
+            month = after
+    return windows + ["Attendance_Date__c = null"]
 
 
 def cmd_snapshot(args, paths, org):
+    """Reads everything before it writes anything: a read that fails or is refused leaves the folder as it was."""
     state = {"read_at_utc": "", "source": f"sf CLI login '{org.alias}'"}
-    for name, soql in STATE_QUERIES.items():
-        state[name] = plain(org.query(soql))
+    state["accounts"] = plain(org.query(STATE_QUERIES["accounts"]))
+    state["batches"] = plain(org.query(STATE_QUERIES["batches"]))
+    state["attendance"] = [found for window in attendance_windows(org)
+                           for found in aggregate(org, STATE_QUERIES["attendance"].format(window=window))]
+    state["participants"] = aggregate(org, STATE_QUERIES["participants"])
     state["read_at_utc"] = stamp()
     save_private(paths.state, json.dumps(state, indent=1))
     print(f"snapshot: {len(state['accounts'])} accounts, {len(state['batches'])} batches, "
