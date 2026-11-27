@@ -1017,6 +1017,9 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **The date compared:** `Monthly_Report_submission_date__c` is a date formula on `CreatedDate`, the creation's date in GMT: a report filed on the evening of the 15th in the Americas can already be the 16th in GMT, and Late.
 - **Why:** the 15th is when GLOW expects the reports (they come in between the 5th and about the 15th of the next month, plan of #195); a field rather than a report formula, so one value serves the chart, item 18's column and any later report.
 - **Rejected:** a report-level formula (one per report, and a summary formula cannot group a stacked column); a rule in the partner's own time zone (the record has none).
+- **Consequences:**
+  - A report filed on the evening of the 15th in the Americas can read Late (the GMT date).
+  - The 6 Monthly Reports with no `Period__c` (none in the reporting year) have no value and are in neither bar of the chart.
 
 ### 2026-11-23 — The photo folders already on the Shared Drive are re-filed once, from a club → partner list (#237)
 

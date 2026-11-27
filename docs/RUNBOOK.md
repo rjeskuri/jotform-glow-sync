@@ -5503,8 +5503,8 @@ items 17-19 copied to Decommissioned the same day (`copy --tag "#200"`), and liv
 (deploy `0AfRP000002j9lx0AA`, check-only `0AfRP000002j9kL0AQ`, 09:03 UTC), read back into
 `after/` and checked against SOQL ([Result](plans/2026-11-02-sf-review-reporting.md#result)).
 Ticket #119 (epic #68, Ryan's request of 2026-11-02; [plan](plans/2026-11-20-sf-on-time.md);
-DECISIONS 2026-11-20): retrieved live 2026-11-20 into `data/sf_on_time_2026-11-20/before/`, item 18
-copied to Decommissioned the same day, and live (deploy `0AfRP000002keu90AA`, check-only
+DECISIONS 2026-11-20): retrieved live 2026-11-19 UTC (2026-11-20 on the Mac's clock) into
+`data/sf_on_time_2026-11-20/before/`, item 18 copied to Decommissioned the same day, and live (deploy `0AfRP000002keu90AA`, check-only
 `0AfRP000002kesX0AQ`, 2026-11-19 16:44 UTC; the field's fix deploy `0AfRP000002kexN0AQ`, 16:47
 UTC), read back into `after/` and checked against SOQL
 ([Result](plans/2026-11-20-sf-on-time.md#result)).
