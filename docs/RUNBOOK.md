@@ -63,6 +63,7 @@ headings, so a heading is never renamed (`make check` runs
   - [Interactive dashboard in Salesforce](#interactive-dashboard-in-salesforce)
   - [September back-fill: the resolver](#september-back-fill-the-resolver)
   - [Back-fill of attendance into Salesforce](#back-fill-of-attendance-into-salesforce)
+  - [Attendance processor watch](#attendance-processor-watch)
 - [Admin and work log](#admin-and-work-log)
   - [Credentials](#credentials)
   - [Live gate (Claude Code)](#live-gate-claude-code)
@@ -207,7 +208,10 @@ accounts, automatically"). It is one more SyncLog row, region `Salesforce`; its 
 ATTENTION items starting `SF:`. The end-of-run check reports a partner-less stray account
 only when every regional form's names were read, and a region whose form is disabled
 (`skipped`) counts as read: its clubs keep their accounts, under their partner, so they are
-not strays (a `failed` region does not count, and no stray is reported that run).
+not strays (a `failed` region does not count, and no stray is reported that run). With the same
+login the run also watches the attendance processor: an `SF:` ATTENTION item when its Apex is
+not the build we deployed, or when no Jotform batch has arrived for 48 hours on a weekday
+("Attendance processor watch").
 
 **Safety bands** (per region, per run; `--max-creates`, `--max-updates`,
 `--max-retires`, `--max-restores`):
@@ -1242,6 +1246,16 @@ the region folders themselves ([retention plan](plans/2026-10-30-photo-retention
 is deleted from Drive until the photo mover's retention is live. Jotform keeps its own copy
 (Auto Delete Submissions stays off, BACKLOG 68).
 
+**The date in a folder's name is the session date** (question 17, the date the mentor picks),
+not the upload date (#225; checked by eye on two folders, 2026-11-23).
+**Planned (#225, not live yet):** the subfolder naming becomes `{Partner} | {Club Name} | {Date} | {Week}` (e.g. `Sunrise Partners | Sunrise Club |
+10-30-2026 | 4`; `{Week}` is question 100, blank for a special event), and the photo mover files
+such a folder under `<Region>/<Partner>/<YYYY-MM>/` ("Photo mover", below). It waits for question
+331 (Partner) to be filled on the forms with the Club picker (a calculation the sync generates,
+CLAUDE.md rule 3; a follow-up ticket); the order and every step: the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout. Until then step 2's naming
+below stands.
+
 `python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
 Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
@@ -1413,6 +1427,16 @@ owned by Ryan's company account - not the sheet's script, whose scopes must not 
 for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
 Setup, Script Properties and the push: `drive-sync/README.md`.
 
+**Where a subfolder goes** (#225, in the repo since 2026-11-19; live once pasted, [plan](plans/2026-11-19-photo-folders-partner-month.md)):
+a subfolder named `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (the week blank or left out
+for a special event) goes in `<Region>/<Partner>/<YYYY-MM>/`, the month from its session date;
+the mover finds the partner and month folders by name (one in the trash does not count) and
+makes them when missing. Any other name (`<Club> <MM-DD-YYYY>`, the club alone, a blank partner,
+a date that is not a real date) goes directly in the region folder, as before. The subfolder's
+own name never changes, and a same-name folder counts only at its own path (a merge, a
+`REFUSED`). The folders already on the Shared Drive stay where they are until their one-time
+re-filing ("Re-filing the existing folders (#237)", below: their names carry no partner).
+
 The order, each live step on Ryan's go (Ryan, 2026-10-22):
 
 1. PR #91 lands: code only, nothing live.
@@ -1481,8 +1505,90 @@ no new scope, no new service):
    the plan's Result. From then on the mover removes the emptied subfolders (step 6 of the
    paste above).
 
+**Updating the live project (#225)** (Ryan, on his go; the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout): `removeTrigger`, the same
+paste of `Plan.gs` and `Mover.gs` (the manifest unchanged: no new scope, no new service),
+`previewMoves` (the existing subfolders log as before, without a target path; nothing changes),
+then `installTrigger`. The new code files only the new naming under partner and month, so it
+can go live before any form's naming changes.
+
+**Re-filing the existing folders (#237)** (Ryan, once, on his go, after #225's naming is live on
+the forms; the [plan](plans/2026-11-23-refile-photo-folders.md), Rollout). The club folders the
+mover filed before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/`, or
+`<Region>/<Partner>/undated/` for a name with no date, keeping their names and photos. In short:
+the Roster and Partners exports, `tools/refile_list.py` (it writes `RefileList.gs`, the club →
+partner list), `removeTrigger`, the paste of `drive-sync/Refile.gs` and that file into the
+project, `installTrigger`, `previewRefile` (the dry run: every folder directly in a region folder
+with its target, or its code and reason for staying; it reads one folder per Drive call, #262, so
+run it again until a run logs `cycle complete`, each `TIME_BUDGET` line saying what is left),
+**Ryan reviews that log**, then `refileExisting` likewise until a run moves nothing and logs no
+`TIME_BUDGET`, `previewRefile` again (`would refile 0`), and both files
+deleted from the project. A folder whose partner is not found stays where it is, listed with the
+reason. Undo: move a folder back into the region folder by hand (nothing is renamed or deleted).
+`REFILE_FAILED <Region> "<name>"`: Drive refused the move, or its read-back does not show the
+folder in its month folder; the rest goes on, the run ends in an error, look for the folder by
+hand.
+
+**Updating the live project (retention, #183)** (on Ryan's go; the
+[retention plan](plans/2026-10-30-photo-retention.md), Rollout). The retention code (#182, #185,
+#191, #265) goes live with `RETENTION_DAYS` unset and is switched on only after a dry run Ryan
+reads. The account that runs the mover is no member of the Shared Drive (it reaches the region
+folders through folder sharing), so the retention read lists one folder per Drive call (#265),
+from the region folders down, and a big Shared Drive takes several runs to read. Each run reads
+on from where the last one stopped: the progress is in the Script Properties
+`RETENTION_STATE_PREVIEW_*` (`previewMoves`) and `RETENTION_STATE_APPLY_*` (`moveSettledPhotos`),
+kept apart, and is not to be edited. Only the run that completes the read plans, logs `would
+trash` and, on the real run, trashes. Nothing is planned or trashed from a partial read.
+
+1. Ryan: `removeTrigger` (`removeTrigger: 1 trigger(s) deleted; the mover is stopped`).
+2. Claude, on Ryan's go: `clasp pull` of the live project first (the backup, and which commit
+   is live), then main's `drive-sync/Plan.gs` and `Mover.gs` pushed with clasp 2.4.2 on Node 18
+   on the company login (`~/.config/clasp-company/`, not the global login `appsscript/` uses).
+   The manifest is unchanged: no new scope, no new service. Then `clasp pull` again and compare
+   with main. clasp 2.4.2 can print `Pushed N files.` after an error and exit 0 (#225's Result),
+   so the read-back decides. Or Ryan pastes the two files whole.
+3. Ryan: `previewMoves` with `RETENTION_DAYS` unset: `retention off (RETENTION_DAYS not set)`,
+   the moves as before, no `CONFIG refused`.
+4. Ryan: Script Properties → `RETENTION_DAYS` = `90`.
+5. Ryan: `previewMoves`, **repeated while the retention read is unfinished**. A run that has not
+   read the whole tree logs `TIME_BUDGET: retention read not complete (run N of it: F folder(s)
+   listed, L found and not listed yet, K KB kept): nothing planned or trashed this run; the next
+   run reads on`, and no `would trash` line. The next run starts with `retention read: carrying
+   on from the last run (…)`. Each dry run reads for about 4.5 minutes. Run it again until a run
+   logs `retention read complete: N folder(s) listed in R run(s)` and then, per region, `would
+   trash N file(s) and M folder(s)`. That run's log is the plan to read (the plan's Rollout, step
+   4). Nothing on the Shared Drive changes. The dry run's progress is its own: the real run reads
+   afresh.
+6. Ryan: `installTrigger`. The real run reads in the same way, for about 3 minutes a run (it keeps
+   the rest of its budget for the trash). Its first runs log the same `TIME_BUDGET: retention read
+   not complete …` line and trash nothing. The run that completes the read plans and trashes
+   (`trashed N file(s) and M folder(s)`), and the next run starts a new read.
+7. The plan's Result: the dates (UTC), the runs each read took, the counts.
+
+What else a retention line can say:
+
+- `retention read: … changed since the last run`, `… could not be read`, `… began more than 24
+  hours ago`: what was kept is dropped and the read starts again by itself. Nothing to do.
+- `RETENTION_FAILED the read (run N of it, …)`: Drive refused a listing. Nothing is planned or
+  trashed, and the run ends in an error. What was read is kept, and the next run tries that folder
+  again. `The attempted action requires shared drive membership.` there is a bug (every listing
+  names one folder): delete `RETENTION_DAYS` and stop.
+- `RETENTION_FAILED the progress kept for the next run (…): K KB … not kept`: the Script
+  Properties are full (9 KB a value, 500 KB in all, every property counted). An unfinished
+  `previewMoves` read keeps its `RETENTION_STATE_PREVIEW_*` values until a later `previewMoves`
+  completes it. Finish it, or delete those values (Project Settings → Script Properties), never a
+  `SOURCE_`/`TARGET_FOLDER_` one or `RETENTION_DAYS`. If it fails still, the Shared Drive is too
+  big for this read: delete `RETENTION_DAYS` and open a ticket.
+
+Rollback: delete `RETENTION_DAYS` (retention is off from the next run; the `RETENTION_STATE_*`
+values are then unused and may be deleted); the code: the previous `Plan.gs` and `Mover.gs`,
+pushed or pasted back.
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
+A subfolder filed under a partner and month has its target after its name: `would move "<name>"
+to <Region>/<Partner>/<YYYY-MM>` (the dry run), `move "<name>" to …` (the real run); one filed
+directly in the region folder has none.
 
 - **move**: a folder of that name was made in the region's folder and the subfolder's files
   moved into it (Drive cannot move the folder itself, #132); the emptied subfolder stays in My
@@ -1512,8 +1618,11 @@ remove N, rescue N`, then the folders by name (club and date; never a file's nam
 - **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
   moving at 4.5; what it did not read is not touched, and the next run carries on (a move cut
   short, its folder made and some files moved, is finished by the next run as a merge).
-- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
-  hand (pick the right folder), or rename one of the two there.
+- **REFUSED**: two or more folders of that name on the Shared Drive already (at its path). Move
+  or merge it by hand (pick the right folder), or rename one of the two there. `REFUSED "<name>"
+  to <Region>/<Partner>/<YYYY-MM>: 2 folders named "<Partner>" in the region folder` (or `named
+  "<YYYY-MM>" in "<Partner>"`, #225): two partner (or month) folders of one name; nothing of that
+  subfolder moves until the two are merged by hand into one.
 - **UNKNOWN**: a folder that is no region's; left alone.
 - **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
   source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
@@ -1888,11 +1997,24 @@ retired club's girls. Delete that leftover question in the builder first.
 it, and unhidden every mentor sees an optional box: on a form with the Club
 picker the sync hides it (`HIDE partner textbox (q331: no rule shows it; …)`,
 written after the rules). It is still submitted, blank, so the staff
-notification e-mail's "Partner" row is empty from then on. The runner does
+notification e-mail's "Partner" row is empty from then on (until the Partner fill below). The runner does
 not count the hide as a change: it rides along with the next roster change
 it applies on that form, or a hand apply, and that run's SyncLog `detail`
 does not name it (the run's log does: `HIDE partner textbox`). Since 2026-09-30
 it is hidden on all five forms.
+
+**The Partner fill** (#236, [plan](plans/2026-11-23-partner-fill.md)) fills the hidden q331 with
+the picked club's partner, one calculation per partner, for the photo folders' names and the
+staff e-mail. It is turned on by hand, once per form, with `--partner-fill` on the sync (backup,
+dry run, apply, `form_status.py`); from then on the form's own rules keep it on and the runner
+keeps it (it never passes the flag). Refused on a form without the Club picker, and while a rule
+still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` with
+`--from properties-<stamp>.json`, the `backup_forms.py` snapshot taken before it (`--force` if it
+refuses a club renamed or retired since), then at once the sync by hand without the flag
+(`--region` on a regional form; dry run, `--apply`) and `form_status.py`. The dry run must print
+no `Partner fill:` line (`form_status.py` reads CLEAN with the fill on): with no calculation into
+q331 the fill stays off, and a club added since the backup gets back the rules the restore took
+from it, which the runner, reading a rules-only difference as `in-sync`, would never write.
 
 ### The one-time switch (`--same-name-switch`)
 
@@ -2686,7 +2808,7 @@ when nothing matches it creates a new, partner-less Club account.
   - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
   - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
   - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
-  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
+  - 2026-11-26: the first 20 automatic creates (2026-10-23 to 2026-11-26) checked by hand: each a Club account under its partner, Description `created by the automatic sync <date>`, one account per name. `CONFIRM_CREATES` has been off since then: a create is a log line, not an ATTENTION item.
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2801,7 +2923,7 @@ or a command line.
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
 | `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
-| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
+| `created … check it by hand (first creates)` | Off since 2026-11-26 (`CONFIRM_CREATES` in `tools/sf_new_clubs.py`); only if it is turned on again | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
 | `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
@@ -3251,6 +3373,22 @@ and its empty `Girls_Present__c` is not a 0, so the blank-submissions report doe
 `sf_girls_present.py check` leaves merged corrections out (Signals, below). The message is
 filtered on, never selected or printed (on other batches it can quote a name).
 
+**A wrong answer fixed on request** (a mentor asks for a field to be changed, not girls added;
+first done 2026-11-23: the GLOW Club Year 2 → 3 on one Latin America submission and its batch).
+The value lives in two places, and both are fixed:
+- **Salesforce:** the batch and every `Attendance__c` row under it (the rows carry their own
+  `Module__c`, `Module_Week__c` and `Module_Year__c`). Read the batch and its rows first; then
+  the write connector, one record per call, Ryan's go, and read everything back. A batch `PATCH`
+  runs none of the processor (after-insert trigger only).
+- **Jotform:** `GET /submission/{id}` saved to `data/` first, then `POST /submission/{id}`
+  form-urlencoded `submission[<qid>]=<value>`, then read back. A change of year moves the module
+  answer too: the year (q94), the module dropdown of the new year (`glow.sync.MODULES`: q14,
+  q92, q93) and the hidden `Year_ID` (q102); `Module_ID` (q98) and `Week_ID` (q100) as needed.
+  Observed on 2026-11-23: **an empty value does not clear an answer** (the old year's module
+  dropdown keeps its answer; harmless, since what reads the module goes by the dropdown the year
+  names), and **the edit did not re-send the submission to Salesforce** (no new batch for the
+  club and date 20 minutes later), so no duplicate batch to deal with.
+
 **The measure** (Ryan's decisions of 2026-10-19, ticket #59,
 [plan](plans/2026-10-20-girls-attended-tiles.md); it replaces the two measures of 2026-10-15,
 ticket #35):
@@ -3380,7 +3518,7 @@ each write: [plan](plans/2026-10-06-attendance-totals.md#from-the-runbook-moved-
 ## Attendance dashboard in Salesforce
 
 - **When:** a new partner (the Partner filter), a new staff user (the permission set), a report change.
-- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)).
+- **Status:** live since 2026-10-02 (`fix1` 2026-10-06, `totals1/` 2026-10-07; [Result](plans/2026-10-02-attendance-dashboard.md#result-2026-10-02)); the total counts Jotform plus the three partners since 2026-10-15 ~09:05 UTC ([Result](plans/2026-10-15-attendance-total-three-partners.md#result)); #59, the two "Girls who attended (Jotform + 3 partners)" tiles: deployed on Ryan's go 2026-10-21 - phase 1 (the fields, the report type, the three reports, the permission set and the Admin profile entries) `0AfRP000002hhdF0AQ` 04:59 UTC, the `Has_Row__c` fix `0AfRP000002hhi50AA` 05:06 UTC (check-only `0AfRP000002hhgT0AQ`), phase 2 (the dashboard) `0AfRP000002hhlJ0AQ` 05:08 UTC (check-only `0AfRP000002hhjh0AA`); all 10 components read back into `data/sf_girls_tiles_2026-10-20/after/`, equal to `build/` apart from Salesforce's normalisation ([Result](plans/2026-10-20-girls-attended-tiles.md#result)); the 2026-10-09 Access change (the folders shared, the permission set, "(test)" dropped from the labels) is deployed since 2026-10-09 ~05:35 UTC by the metadata dates, its deploy id not known here (read 2026-10-15; Access, below; [Result](plans/2026-10-09-attendance-reports-public.md#result-2026-10-09-build-and-check-only-nothing-deployed-no-record-written)); #103, the submission timing (below): deployed on Ryan's go 2026-11-20 03:06 UTC (`0AfRP000002khIX0AY`, check-only `0AfRP000002khDh0AI`), read back equal to `build/`, every new component checked against SOQL ([plan](plans/2026-10-23-submission-timing.md#task-103-the-timing-on-the-dashboard)).
 - **Dry run:** the check-only deploy (`--dry-run`), step 4 of "The steps".
 - **Apply:** the same without `--dry-run`, Ryan's go (VPN off).
 - **Verify:** retrieve again and compare with the build; one report's totals against SOQL.
@@ -3393,7 +3531,8 @@ Its label lost "(test)" with the 2026-10-09 Access deploy (below); the Developer
 
 What it shows - the headline tiles (below), weekly and monthly charts, last month by partner and
 by module, the clubs with no attendance or not submitting, and since #231 (2026-11-18) a table of
-girls present by club and date in place of the blank-submissions tile - and how to
+girls present by club and date in place of the blank-submissions tile, and with #103 the
+submission timing (below) - and how to
 read its numbers (a session, a blank and "did not submit" defined; late submissions, so "last
 month" settles around the 20th; a club without a partner; the refresh is a snapshot): [plan](plans/2026-10-02-attendance-dashboard.md#from-the-runbook-moved-2026-10-09).
 
@@ -3408,10 +3547,47 @@ type's `$` names, and needs a sort. The "Blank Submissions" report stays in the 
 only the tile is gone, and the two tiles beside it are 6 columns wide
 ([plan](plans/2026-11-18-sf-dash-club-date-table.md)).
 
-**The headline tiles** (ticket #59, [plan and Result](plans/2026-10-20-girls-attended-tiles.md);
-deployed 2026-10-21 in two phases, the reports first, checked against SOQL through the Analytics
-API, then the dashboard; `data/sf_girls_tiles_2026-10-20/build/BUILD.md` describes the build, and
-`after/` beside it is the read-back):
+**Submission timing** (#103, epic #93 item 2; Ryan's answers of 2026-10-26 on the ticket;
+[plan](plans/2026-10-23-submission-timing.md#task-103-the-timing-on-the-dashboard); built
+2026-11-20 in `data/sf_session_timing_2026-11-19/`, deployed 2026-11-20 03:06 UTC on Ryan's go,
+`0AfRP000002khIX0AY`): four components on
+three of #102's reports ("Submission timing in Salesforce", The timing reports), in two rows below
+the club-by-date table, and the timing in the "How to read this dashboard" box below them.
+- The metric "Clubs not submitting", labelled "last week", reads `Clubs_Not_Submitting_Last_Week`:
+  the club accounts with a partner and no submission of any kind dated last week (`LAST_WEEK`),
+  less the three monthly partners, the U.S partners and the obsolete clubs, as that report has
+  it. It counts as the 14-day metric does (record count).
+- Below it, the table "Clubs not submitting last week, by partner (open for the club list)" reads
+  `Clubs_Not_Submitting_Last_Week` too: those clubs counted by partner, the most first; a click
+  opens the report and its club list.
+- The metric "Average days from session to submission", labelled "last month", reads
+  `Late_Submissions_Last_Month`: the average of `Submission_Delay_Days__c` over every Jotform
+  submission with a session date last month, whatever its delay. There is no threshold: it is an
+  average, in place of the outline's metric (Ryan, 2026-10-26; DECISIONS 2026-10-23). A click
+  opens the report, each submission with its days, the largest first within each partner. The
+  report gains an Average summary on the delay column for it (a metric shows only a summary its
+  report defines).
+- The bar chart "Average days from session to submission, by partner and month (since 1 Sept)"
+  reads `Submission_Delay_by_Partner_by_Month`: the average of `Submission_Delay_Days__c`
+  by partner, one bar per session month (`Session_Month__c`). #103 gives that report a floor,
+  session dates from 2026-09-01 like the other attendance reports (Ryan, 2026-10-26), beside its
+  window of this month and the 11 before it; the floor drops the February-March 2026 pilot batches,
+  which would otherwise show as a blank-partner bar ("-") under All.
+- Each of the four new components follows the dashboard's Partner filter and its Region filter,
+  through its report's own columns: `PARENT.NAME` and `Account.Partner_Region__c` on
+  `Clubs_Not_Submitting_Last_Week` (Accounts), `Attendance_Batch__c$Account__c.Parent` and
+  `Attendance_Batch__c$Account__c.Partner_Region__c` on the two batch reports. The fields they read
+  are in `Attendance_Report_Viewer` (#101, #222), so a viewer who opens one sees its report.
+- The "How to read this dashboard" box gains five bullets on the timing. Last week is the
+  Sunday-to-Saturday week before this one (`LAST_WEEK`, in the locale of the dashboard's running
+  user). "Submitted at" (`Submitted_At__c`) is the moment the Jotform form reached Salesforce, the
+  batch's `CreatedDate`; the days from session to submission run from the session date to its UTC
+  day. The September back-fill batches and the three partners' monthly batches (`Partner report`)
+  have no submission time, so no delay. The average is over every Jotform submission of last
+  month, and the chart has a bar per session month since 1 September 2026. There is no threshold:
+  nothing is flagged as late, staff read the days.
+- **A second layout, `build_sibling/`**, was built in case Salesforce refused 22 components. It
+  is not used: check-only `0AfRP000002khDh0AI` passed `build/` with all 22 (2026-11-20).
 - Since 2026-10-21 (#59) the top row is two tiles headed "Girls who attended (Jotform + 3
   partners)", one for last month and one for this month so far.
 - Each tile is the month's girls who attended, Jotform and the three partners together; how it is
@@ -3804,6 +3980,25 @@ prompt; with `?filter1=` in the path it is judged as a write): `sf api request r
   - The Attendance folders have no copies: the copy tool never takes them, so `before/` is the
     record of what the lists and the dashboard were.
   - Never from an older build or retrieve. Nothing is deleted.
+- Rollback of #103, the timing components ([plan](plans/2026-10-23-submission-timing.md#rollback-2);
+  DECISIONS 2026-10-16), VPN off, in `data/sf_session_timing_2026-11-19/`:
+  1. Retrieve the dashboard `Attendance/Jotform_Attendance_test` fresh and compare it with #103's
+     read-back `after/` (beside `dashboard_before/`). If it differs beyond Salesforce's
+     normalisation, someone changed it since: stop, and build the rollback from that fresh
+     retrieve instead, taking out of it only the four components and the box's timing bullets.
+  2. Equal: check-only first, then on Ryan's go redeploy only the dashboard, from
+     `dashboard_before/`: within `dashboard_before/`, `sf project deploy start --dry-run -o glow -m
+     "Dashboard:Attendance/Jotform_Attendance_test"`, then the same command minus `--dry-run`.
+     Never `-d force-app` within `build/` nor an older package (DECISIONS 2026-10-16).
+  3. Retrieve the dashboard again and compare it with `dashboard_before/`.
+  - #102's four reports stay, the two #103 edited included: the Average summary on
+    `Late_Submissions_Last_Month` and the 2026-09-01 floor on `Submission_Delay_by_Partner_by_Month`
+    are kept, since nothing else changes when the dashboard stops reading them. Taking either out
+    is an edit of a fresh retrieve of that report, on Ryan's go; `reports_before/` keeps them as
+    they were before #103.
+  - With the sibling dashboard "Attendance Submissions" live (`build_sibling/`), it is retired with
+    the rollback: moved to Decommissioned by hand in Lightning, keeping its Id (the archive rule,
+    DECISIONS 2026-10-21), never deleted.
 
 ## Submission timing in Salesforce
 
@@ -3815,7 +4010,9 @@ prompt; with `?filter1=` in the path it is judged as a write): `sf api request r
   with the corrected text the same day (deploy `0AfRP000002i4LJ0AY`, 06:59 UTC), and the check
   reads `-> OK` on all 1,123 ([plan](plans/2026-10-23-submission-timing.md), Result). The four
   timing reports of task #102 are deployed since 2026-10-26 12:34 UTC (#157, deploy
-  `0AfRP000002i9xh0AA`; "The timing reports", below).
+  `0AfRP000002i9xh0AA`; "The timing reports", below). Task #103 puts three of them on the Jotform
+  Attendance dashboard: deployed 2026-11-20 03:06 UTC (`0AfRP000002khIX0AY`, "Attendance dashboard in Salesforce",
+  Submission timing).
 - **Dry run:** the check-only deploy (`--dry-run`), the plan's Rollout step 4; the check below
   is read-only.
 - **Apply:** the deploy, Ryan's go, VPN off (the plan's Rollout steps 5-6).
@@ -3942,15 +4139,42 @@ login `glow` or the read-only connector; counts and partner names only):
   Account__r.Parent.Name, Account__r.Name, Attendance_Date__c, Submitted_At__c,
   Submission_Delay_Days__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND
   Processing_Status__c = 'Success' AND Attendance_Date__c = LAST_MONTH ORDER BY
-  Submission_Delay_Days__c DESC`.
+  Submission_Delay_Days__c DESC`. #103's build adds an Average summary to its delay column, for
+  the dashboard's average-delay metric; deployed with the dashboard, it changes no row.
 - `Submission_Delay_by_Partner_by_Month` ("Submission Delay by Partner by Month", a summary with a
   bar chart) answers how long each partner's clubs take, month by month: the average and the
   maximum of `Submission_Delay_Days__c` over the live Jotform batches, by partner and session
   month (`Session_Month__c`), this month and the 11 before it (`N_MONTHS_AGO:11`); the chart shows
-  the average, a bar per partner and month. Check: `SELECT Account__r.Parent.Name,
-  Session_Month__c, AVG(Submission_Delay_Days__c), MAX(Submission_Delay_Days__c), COUNT(Id) FROM
-  Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
-  Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
+  the average, a bar per partner and month. Check (averaged per partner and month in a script: SOQL refuses to group by the formula
+  `Session_Month__c`, HTTP 400 on 2026-11-20): `SELECT Account__r.Parent.Name, Session_Month__c,
+  Submission_Delay_Days__c FROM Attendance_Batch__c WHERE Creator__c = 'Jotform' AND
+  Processing_Status__c = 'Success' AND Attendance_Date__c >= 2026-09-01 AND Attendance_Date__c >=
+  N_MONTHS_AGO:11`. Since #103's deploy (2026-11-20) the report has a floor, session dates from
+  2026-09-01 (Ryan, 2026-10-26: it drops the February-March 2026 pilot batches of its blank-partner
+  group), hence the check's `>= 2026-09-01` ("Attendance dashboard in Salesforce", Submission
+  timing).
+
+**Club-level attendance for photo checks** (#226; not among the four timing reports above):
+
+- `Girls_Present_by_Club_and_Week` ("Girls Present by Club and Week", `00ORP000009tUjR2AU`, a
+  matrix on `Attendance_Totals`, standalone, not on the dashboard; #226, 2026-11-19) is the report
+  for checking mentors' photos against attendance: rows partner then club, columns the session
+  week, each cell the sum of `Girls_Present__c` of the week's Jotform sessions (`Creator__c`
+  starts with `Jotform`, `Processing_Status__c` `Success`; partner reports left out). A girl at
+  two sessions in a week counts twice. Show Details lists each session: batch, session date,
+  module and module week. Its date filters (default `N_WEEKS_AGO:8` to `THIS_WEEK`) and Region
+  (`Account__c.Partner_Region__c`), Partner and Club (`contains`) are unlocked: any viewer changes
+  them in the Filters panel. A matrix takes two row groupings, so Region is a filter, not a row.
+  Check (sum per club and week in a script; `Session_Week__c` is a formula SOQL cannot group):
+  `SELECT Account__r.Parent.Name, Account__r.Name, Session_Week__c, Girls_Present__c FROM
+  Attendance_Batch__c WHERE
+  Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >=
+  N_WEEKS_AGO:8 AND Attendance_Date__c <= THIS_WEEK`. ([plan](plans/2026-11-19-sf-club-week-girls.md))
+- "Attendance By Club By Date" (`Attendance_By_Club_By_Week_Wdl`, `00ORP000007uBRN2A2`, a summary
+  on `Accounts_Contacts_Attendance`) lists each girl's attendance by club and date. Since #226
+  (2026-11-18) its Region, Partner and Club filters (`contains`) are unlocked for any viewer, and
+  its date range is the attendance date, last 90 days by default (until then the club account's
+  created date, this year).
 
 Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
 (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
@@ -4172,14 +4396,18 @@ back:
   District (`001RP00000VxX9PYAV`), region U.S: 11 Club accounts, 46 Monthly Reports in 2026.
 - Since #209 every Monthly report on D1-D5 and item 19, the stories table, filters
   `DHIS2__c$Account__c notEqual` the six U.S partners, a locked criteria item beside the test
-  rule. D1-D5 themselves are unchanged; the U.S Monthly Reports of January-October 2026 leave them
-  retroactively.
+  rule. Since #267 six totals reports pair that item, by an OR in their `booleanFilter`, with a
+  locked `DHIS2__c$Period__c lessThan 11/1/2026`, so on those six the U.S Monthly Reports before
+  2026-11-01 count again ("The U.S Monthly Reports through October 2026", below). D1-D5
+  themselves are unchanged; until #267 the U.S Monthly Reports of January-October 2026 left every
+  component retroactively, and since #267 they leave the other Monthly reports only.
 - The three monthly partners' Monthly Reports stay on D1-D5: those partners do report, through
   Salesforce.
 - Item 6 and the attendance-row reports are unchanged by #209, because the U.S has no batches.
 - The SOQL signals in this section equal the dashboards' components only with
   `AND Account__r.Name NOT IN (<the six>)` added to their `WHERE` since #209, because the
-  components leave out the six U.S partners.
+  components leave out the six U.S partners, except the six totals reports, which since #267
+  equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` instead.
 
 Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
 VPN off, after a check-only, on Ryan's go:
@@ -4188,6 +4416,47 @@ VPN off, after a check-only, on Ryan's go:
   `data/sf_us_partners_2026-11-05/before/` only while a fresh retrieve equals `after/`.
 - The copies in Decommissioned (tagged `#209`) are the record of what the reports were, not the
   restore; item 11's metadata copy stays there too.
+- Never from an older build or retrieve. Nothing is deleted.
+
+**The U.S Monthly Reports through October 2026** (#267, Ryan, 2026-11-24/25: the monthly
+dashboards line up with the interactive dashboard; [plan and
+Result](plans/2026-11-25-sf-us-monthly-totals.md); DECISIONS 2026-11-25), deployed 2026-11-25 on
+Ryan's go, "go with sums", given on the prep's check-only `0AfRP000002kzKH0AY` (after the go a
+fresh retrieve, the check-only `0AfRP000002l1Nh0AI`, then deploy `0AfRP000002l1XN0AY`), and read
+back. Since #267 six totals reports count the six U.S partners' Monthly Reports with
+`Period__c` before 2026-11-01 again, the months the U.S partners were active (their form was
+disabled on 2026-10-06):
+- Overall Attendance by Month (`00ORP000009p0FJ2AY`, D1).
+- Participation by Month and Partner (`00ORP000005rSbB2AU`, item 3).
+- GLOW Club Each Week (`00ORP000005ufOz2AI`, item 4).
+- Club Observations by Month and Partner (`00ORP000004RJZD2A4`, item 10).
+- Number of mentors trained about module (`00ORP000004RJZE2A4`, item 13).
+- Number of training sessions led (`00ORP000004RJZ82AO`, item 14).
+
+The six reports' filter: in each, the locked #209 item `DHIS2__c$Account__c notEqual` the six is
+ORed with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` through
+`booleanFilter` (filter logic), for example `1 AND 2 AND (3 OR 5) AND 4` on Overall Attendance by
+Month (each report's filter logic is in the plan's Result). The other items (the reporting year,
+the account not blank, the account name not containing "test", a report's own) stay ANDed. Their
+SOQL signals equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` added to
+the `WHERE`; on 2026-11-25 Overall Attendance by Month showed 49,976 for January-October 2026,
+the U.S 639 of it, equal to SOQL.
+- Every other Monthly report, the 15 kept on D1-D5 (who reported, what is approved, on time,
+  which clubs or modules) and item 19 (the stories table), keeps the full #209 exclusion.
+- Item 6 (Modules Implemented by Month and Partner, `00ORP000009kUNh2AM`, report type
+  `Attendance_Totals`) is unchanged by #267, with no #209 item, because the U.S has no batches.
+- The three not-submitted lists and the Jotform Attendance dashboard's Partner filter are
+  unchanged by #267: they still leave out the six U.S partners.
+- A U.S Monthly Report for November 2026 or later stays out of every report, the six totals
+  reports too.
+
+Rollback of #267 ([plan](plans/2026-11-25-sf-us-monthly-totals.md#rollback); DECISIONS
+2026-10-16), VPN off, after a check-only, on Ryan's go:
+- The six totals reports are restored by a deploy from a fresh retrieve with the `booleanFilter`
+  and the Period item removed, or from #267's own `data/sf_us_monthly_2026-11-25/before/` only
+  while a fresh retrieve of the six equals `after/`.
+- The copies in Decommissioned (tagged `#267`) are the record of what the reports were, not the
+  restore.
 - Never from an older build or retrieve. Nothing is deleted.
 
 ### Decommissioned
@@ -5226,8 +5495,8 @@ Rollback of #197 ([plan](plans/2026-11-02-sf-review-implementation.md#rollback);
 ### GLOW Club Reporting
 
 The dashboard "Reporting" (`01ZRP000006oxSr2AI`, D5 in `glow/sf_keep_list.csv`, in "GLOW Monthly
-Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18, and since #200 the approval
-overview chart. Item 19 is the table, on no dashboard. Ticket #79,
+Dashboards") is the GLOW Club Reporting dashboard: items 17 and 18, since #200 the approval
+overview chart and since #119 the on-time chart. Item 19 is the table, on no dashboard. Ticket #79,
 [plan](plans/2026-10-24-sf-dash-reporting.md). Status: deployed 2026-10-26
 (`0AfRP000002i7330AA`) from `data/sf_dash_reporting_2026-10-24/build/`, read back into `after/`
 and checked against SOQL (the plan's Result).
@@ -5237,6 +5506,12 @@ Ticket #200 (epic #194, GLOW's review of 2026-11-02;
 items 17-19 copied to Decommissioned the same day (`copy --tag "#200"`), and live on Ryan's go
 (deploy `0AfRP000002j9lx0AA`, check-only `0AfRP000002j9kL0AQ`, 09:03 UTC), read back into
 `after/` and checked against SOQL ([Result](plans/2026-11-02-sf-review-reporting.md#result)).
+Ticket #119 (epic #68, Ryan's request of 2026-11-02; [plan](plans/2026-11-20-sf-on-time.md);
+DECISIONS 2026-11-20): retrieved live 2026-11-19 UTC (2026-11-20 on the Mac's clock) into
+`data/sf_on_time_2026-11-20/before/`, item 18 copied to Decommissioned the same day, and live (deploy `0AfRP000002keu90AA`, check-only
+`0AfRP000002kesX0AQ`, 2026-11-19 16:44 UTC; the field's fix deploy `0AfRP000002kexN0AQ`, 16:47
+UTC), read back into `after/` and checked against SOQL
+([Result](plans/2026-11-20-sf-on-time.md#result)).
 
 D5 and its reports show 2026 only, no 2025 month (GLOW's review), until the reporting year moves
 on 15 February 2027 (#195).
@@ -5246,10 +5521,21 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   (`00ORP000006XXEf2AO`; "Approved Approvals monthly report" until #200, GLOW's name since, the
   Id unchanged): the Monthly Reports with `Approved__c` ticked, a record count. Its D5 table is
   titled the same.
+- The on-time field (#119) is `DHIS2__c.Submitted_On_Time__c`, "Submitted On Time", a text
+  formula: it reads "On time" when the Monthly Report's `Monthly_Report_submission_date__c` is on
+  or before the 15th of the month after its `Period__c` (December's report: by 15 January), and
+  "Late" when it is later. A Monthly Report with a blank `Monthly_Report_submission_date__c` or a
+  blank `Period__c` gets no value: `Submitted_On_Time__c` is blank too, neither "On time" nor
+  "Late". The submission date is the date the record was created, in GMT. Read access only,
+  for the profiles Admin and GLOW Standard User, as #195's fields; the report type `Dhis2` offers
+  it next to the submission date. The rule is Ryan's and GLOW's (DECISIONS 2026-11-20). Until
+  #119 no report computed "on time": the hold of 2026-10-23 was lifted on 2026-11-02.
 - Item 18, GLOW's "Report submitted on time", is the report "Reports completed on time"
-  (`00ORP0000054DyH2AU`): the Monthly Reports filed, a record count, with each one's
-  `Monthly_Report_submission_date__c` and `Monthly_Report_Modified_Date__c` as columns. No report
-  computes "on time" yet (#119, on hold).
+  (`00ORP0000054DyH2AU`, the Id unchanged): the Monthly Reports filed, a record count, grouped by
+  Partner (`Account__c`) and Month (`Period__c`), with each one's
+  `Monthly_Report_submission_date__c`, `Submitted_On_Time__c` (the column #119 added) and
+  `Monthly_Report_Modified_Date__c` as columns, so it shows on time versus late per partner and
+  month. Its D5 table keeps the partner and month rows with their counts.
 - Item 19, GLOW's "GLOW of the Month Stories", is the report "GLOW of the Month Stories Report"
   (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
   support, community impact, success story, personal growth). Its "Formatted Report" export cuts
@@ -5273,6 +5559,19 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   reporting year: `SELECT CALENDAR_MONTH(Period__c), Approved__c, COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND Account__c != null AND (NOT Account__r.Name LIKE '%test%') GROUP BY CALENDAR_MONTH(Period__c), Approved__c`.
   Since #209 add `AND Account__r.Name NOT IN (<the U.S partners' names>)` for it to equal the
   overview ("The U.S partners", at the top of this section).
+- The on-time overview (#119) is the new report "On Time by Month" (`00ORP000009taVV2AY`,
+  `On_Time_by_Month`, in "GLOW Monthly Reports") shown on D5 as a stacked column
+  (`ColumnStacked`), "Monthly Reports Submitted On Time vs Late by Month", full width below the
+  approval overview (row 18, 12 columns, 8 rows), mapped on both dashboard filters, Partner
+  Manager and Month: the Monthly Reports submitted on time versus late, by month. The report is a
+  summary report grouped by `Period__c` by calendar month, then by `Submitted_On_Time__c`, a
+  record count, with the filters of "Approval Status by Month" as they are live since #209: the
+  reporting year, the account not blank, the account name not containing "test", not one of the
+  six U.S partners. SOQL signal, every month of the reporting year: `SELECT
+  CALENDAR_MONTH(Period__c), COUNT(Id) FROM DHIS2__c WHERE In_Reporting_Year__c = true AND
+  Account__c != null AND (NOT Account__r.Name LIKE '%test%') AND Account__r.Name NOT IN (<the U.S
+  partners' names>) AND Submitted_On_Time__c = 'On time' GROUP BY CALENDAR_MONTH(Period__c)`, and
+  the same with `'Late'` (SOQL groups by no formula field).
 
 How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - Since #200 each report, items 17, 18 and 19, filters `In_Reporting_Year__c equals true` (#195),
@@ -5297,7 +5596,8 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
 - The dashboard filters on Partner Manager (`DHIS2__c$Account__c.Assigned_Partner_Manager__c`), so
   each manager picks their own partners (Ryan, 2026-10-24 on #79). Since #200 (GLOW's review, Ryan
   2026-11-02) the dashboard D5 has a Month filter on `DHIS2__c$Month__c` beside it: 12 `equals`
-  options, January to December, mapped on all three components. Until #200 Partner Manager was
+  options, January to December, mapped on all three components (on all four since #119, the
+  on-time chart mapped on both filters). Until #200 Partner Manager was
   its only filter and it had no Month filter (Ryan, 2026-10-24, for every Monthly Report
   dashboard; DECISIONS 2026-10-24). It has no Partner filter.
 - Until #200 the Partner Manager filter offered 7 managers: the 6 it had offered plus the active
@@ -5308,7 +5608,8 @@ How they are built (RUNBOOK "Why the dashboards showed old data", The fix):
   Approval Status" (item 17; "Approved Approvals monthly report" until #200) and "Reports
   completed on time", each a row per partner and month with its count and its totals, which #200
   leaves as they were (GLOW asked nothing about them), and since #200 the overview's stacked
-  column below them (row 10, 12 columns wide, 8 rows high). The two tables took the place of the
+  column below them (row 10, 12 columns wide, 8 rows high), and since #119 the on-time stacked
+  column below that (row 18, the same size, on both filters). The two tables took the place of the
   one component before #79, on "Partner Report Submission On Time" (`00ORP000005u1WP2AY`), one of
   the 19 reports held in "DHIS2 Reports", which moves to Decommissioned once the dashboard no
   longer uses it.
@@ -5354,6 +5655,19 @@ later moves these figures):
   asked true; a stacked column keeps no values printed on its bars, as on D2's stacked charts),
   and it added the default `sortLegendValues` false.
 
+#119's check (2026-11-19 16:47 UTC, 2026-11-20 on the Mac's clock, after the fix deploy and D5's
+refresh; a Monthly Report filed later moves these figures):
+- All 4 components of D5 return data; no grouping label of the on-time chart contains 2025 (0 of
+  10).
+- `Submitted_On_Time__c` equals the rule computed apart from the two dates on all 470 Monthly
+  Reports of the reporting year (0 differ).
+- The on-time chart equals the SOQL signal above in every month, on time / late: January 25/15,
+  February 36/5, March 39/3, April 34/8, May 38/4, June 41/1, July 33/9, August 37/8, September
+  36/7, October 37/5.
+- Ryan's figures of 2026-11-02, 37 of 45 September and 38 of 46 August reports on time, are
+  reproduced exactly with the test-record rule alone; the chart's 36 of 43 and 37 of 45 leave out
+  the U.S partners' reports since #209 (two in September, one on time; one in August, on time).
+
 Rollback, each step on Ryan's go:
 - The reports, items 17-19, are restored from their copies in Decommissioned (`copy --tag "#79"`,
   made before the change), as Decommissioned (above) says. Since #200 they come back by a deploy,
@@ -5396,6 +5710,26 @@ Rollback of #200 ([plan](plans/2026-11-02-sf-review-reporting.md#rollback); DECI
 - The new report "Approval Status by Month" (`00ORP000009p0qb2AA`) is not in `before/`: D5's
   redeploy takes it off the dashboard first, as D5 in `before/` has no component on it, and then
   it moves to Decommissioned (the archive rule above). Nothing is deleted.
+
+Rollback of #119 ([plan](plans/2026-11-20-sf-on-time.md#rollback); DECISIONS 2026-10-16), each
+write on Ryan's go after a check-only, VPN off:
+- Since #119's deploy a fresh retrieve of D5 and item 18 no longer equals #200's `after/`, so #200's
+  rollback above runs only after this one.
+- D5 is redeployed without the on-time chart: by deploying only its own file in #119's retrieve
+  `data/sf_on_time_2026-11-20/before/`, only while a fresh retrieve of it equals `after/`
+  (nothing has changed it since #119's deploy), or a fresh retrieve of it with the fourth
+  component taken out, never from an older build or retrieve.
+- Item 18 comes back the same way, without its `Submitted_On_Time__c` column, in the same deploy as
+  D5: its file in that `before/`, only while a fresh retrieve of it equals `after/`, or a fresh
+  retrieve of it edited back. Its copy in Decommissioned (`00ORP000009taGz2AI`, made before the
+  change, the description "copy of 00ORP0000054DyH2AU, ticket 119") is the record of what it was.
+- The new report "On Time by Month" (`00ORP000009taVV2AY`) is not in `before/`: D5's redeploy
+  takes it off the dashboard first, as D5 in `before/` has no component on it, and then it moves
+  to Decommissioned (the archive rule above).
+- The field `Submitted_On_Time__c`, its `Dhis2` column and its read access stay: a formula field
+  no report reads is harmless (as #195's plan says of its fields). Removing them is a destructive
+  change of its own, from a fresh retrieve, on Ryan's go.
+- Nothing is deleted.
 
 ### GLOW Club Training
 
@@ -5575,14 +5909,20 @@ Apex method, its signature and what it reads: [plan, Inventory](plans/2026-10-21
 `tools/backfill_resolve.py` (GET only) writes one row per (submission, ticked
 roster) of the four regional forms to `data/backfill_2026-09/resolved.json`;
 the club is the roster the mentor ticked girls in, never question 5. Its window
-is September's: for another month, edit `SINCE`, `MONTH_START` and
-`DEFAULT_OUT` at its top first. Its files hold girls' names and mentors'
-contact details: they stay under `data/` (owner-only), and only the counts it
-prints go into a plan or a message.
+is September's unless `--since 'YYYY-MM-DD HH:MM:SS'` (the cut-off, US Eastern,
+Jotform's `created_at`) and `--month-start YYYY-MM-DD` (an attendance date
+before it is flagged `date_before_2026_09`, whatever the month) say otherwise;
+another window also needs `--out` in a new folder (it refuses September's
+default file), the folder the loader then takes with `--dir` (#238). Its
+files hold girls' names and mentors' contact details: they stay under `data/`
+(owner-only), and only the counts it prints go into a plan or a message.
 
 ```bash
 python3 tools/sheets_client.py export Roster data/roster_<date>.csv     # a fresh export, every time
 python3 tools/backfill_resolve.py --roster data/roster_<date>.csv       # GET only; a few minutes (Africa)
+python3 tools/backfill_resolve.py --roster data/roster_<date>.csv \
+    --since '2026-11-13 01:00:00' --month-start 2026-11-01 \
+    --out data/backfill_2026-11/resolved.json                           # an incident's window (#238)
 ```
 
 How to read its report, its flags and its refusals: [plan](plans/2026-09-30-backfill-resolver.md#from-the-runbook-moved-2026-10-09).
@@ -5600,11 +5940,18 @@ Never replay a submission as Jotform stored it: question 5 and the name list
 were wrong on part of September, and Salesforce turns whatever it gets into
 accounts, contacts and attendance at once. `tools/backfill_resolve.py` ("September
 back-fill: the resolver") then `tools/sf_backfill.py` stay the procedure for a
-new incident, but both are written for September: set the window first
-(`SINCE`, `MONTH_START`, `DEFAULT_OUT` in `tools/backfill_resolve.py`; a new
-folder for `tools/sf_backfill.py`, `--dir`, whose default is
+new incident, but both default to September: give the window and a new folder
+first (`tools/backfill_resolve.py --since '<created_at, US Eastern>'
+--month-start <yyyy-mm-dd> --out data/backfill_<when>/resolved.json`; the same
+folder to every `tools/sf_backfill.py` command with `--dir`, whose default is
 `data/backfill_2026-09`), then follow the procedure as run:
 [plan](plans/2026-09-30-september-backfill.md#from-the-runbook-moved-2026-10-09).
+
+A special event (`Special Event - <type>`, any type `glow.sync.is_special_event` accepts, one no longer
+on the forms included) has no session week by design: its session with a blank week is sent with
+`Module_Week__c` blank and its year ([special events](plans/2026-10-13-special-events.md), Decisions 1;
+ticket #244). Any other module without a usable week, and an event without a usable year, stays held
+`module_not_usable`.
 
 **Before anything talks to Salesforce from the Mac: VPN off.** Salesforce freezes a user whose
 app or API connection comes from an anonymising VPN and revokes all their tokens, the Jotform
@@ -5676,6 +6023,127 @@ they are (history); a failed batch is never copied twice.
   rows), then the copies (`batch_id` in `resend_ledger.csv`); set each original's
   `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
   `close <failed id> --removed` for each.
+
+### Correction for a day Salesforce already has (`merge`)
+
+- **When:** a back-fill session whose club and day Salesforce already has, with a `Success` batch and
+  its attendance rows, while the reports tick girls that day lacks (`plan` holds it
+  `salesforce_has_different_count` or skips it `already_in_salesforce`). Never failed as `Duplicate`,
+  so `resend` does not see it. On Ryan's word the session goes as one batch, which the processor
+  (since 2026-10-24, ticket #108) merges into the day's original batch.
+- **Status:** built 2026-11-20 (ticket #244, [plan](plans/2026-11-20-backfill-two-club-days.md)); run live once, 2026-11-20 (AusCam Club 3, 8 rows; [Result](plans/2026-11-20-backfill-two-club-days.md#result)).
+- **Dry run:** the clause `merge` on the session's line in `decisions.csv`, `plan`, then
+  `python3 tools/sf_backfill.py --dir <folder> merge --vpn-off` (it reads Salesforce, so `--vpn-off` too).
+- **Apply:** `merge --apply --vpn-off --only '<key>'` (quoted: a key holds a `|`), Ryan's go.
+- **Verify:** every merge is read back as it is sent; `sf_backfill.py status`;
+  `tools/sf_girls_present.py check`.
+- **Rollback:** by id from `merge_ledger.csv` and `merge_added.csv` (below).
+
+`decisions.csv` takes the clause `merge` (no value; with `use` and `accept`, never with `skip`). A
+`merge` session whose club and day the snapshot has with a `Success` batch and attendance rows is
+neither held for its count nor skipped: every other hold applies as for any session, and
+`club_has_earlier_contacts` always does (the day's girls are not this run's), so the line reads
+`merge; accept club_has_earlier_contacts` plus whatever else Ryan releases. On a day without a
+`Success` batch with rows it is held `merge_without_original`, which `accept` cannot release. A
+planned merge is in `plan.json`'s `merges`, never in the `send` queue; `plan` counts them.
+
+`merge` reads each planned merge's club and day live and predicts by the processor's merge rule, as
+`resend` does: one line per merge (its key, club, date, the original's Name and Id, names ticked / girls
+to add / new contacts), or `skipped, <reason>` - `no_success_original`, `original_not_mergeable` (a
+`Partner report`, or no rows of its own), `module_differs` (the module only, case ignored), `adds_nobody`.
+A skipped merge sends nothing, `--apply` exits 0 on it, and it stays planned for a later run.
+
+`--apply` sends one batch per merge, in the plan's order: the session's names, module, week (blank for
+a special event) and year, no fuzzy matching, `Creator__c` `Jotform back-fill merge <club id>
+<submission ids>` (its marker). It reads the club and day again right before each insert and sends
+nothing for a merge whose prediction changed (a live correction got there first), so it has no
+`MAX_AGE_HOURS` limit on the fetched submissions: what it adds is read live, not taken from the fetch.
+It reads each batch back as `resend` reads a copy (`Success` `merged into <original id>`, no rows or
+count of its own, the original grown by exactly the predicted rows inside the batch's window, the club
+by exactly the predicted contacts, the original's `Girls_Present__c` its rows, no other batch of the
+day inside the window) and also that the rows went to the predicted girls: the existing contacts
+predicted for girls who had one (kept in `merge_ledger.csv` as a digest, never as ids), the rest
+contacts made in the window. Anything else is `CHECK`: the run stops and `--apply` refuses until
+`close <key> --accepted` (a CHECK only) or `close <key> --removed` (removed by hand: the next `--apply`
+predicts it live and sends it again). A lost answer or read-back is `unknown`, settled by its marker
+before the next `--apply` sends (never by club and day; after `SETTLE_AFTER_MINUTES` without its batch,
+`not_saved`); an HTTP 4xx is `not_saved` and nothing more is sent. A `not_saved` merge is a candidate
+again on the next `--apply`, without `--retry`. A merge `ok` or `accepted` is never sent again, not
+after a new snapshot and plan either. `--only <key>` sends one, `--limit N` the first N the day would
+take. A merge never writes `ledger.csv` or `sent_names.json`.
+
+- **Rollback** (only with Ryan's go): `merge_added.csv` lists, per merge (its key and batch id), every
+  attendance row it added to the original and every contact it created. Delete those rows, then each
+  listed contact only while it carries no other attendance row (master-detail: deleting a contact
+  deletes its rows), then the merge batch (`batch_id` in `merge_ledger.csv`); set the original's
+  `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
+  `close <key> --removed`.
+
+## Attendance processor watch
+
+- **When:** an ATTENTION item from the automatic sync starting `SF: the Apex class`, `SF: the
+  Apex trigger`, `SF: no Jotform attendance batch` or `SF: the processor watch could not check`;
+  after any deploy of ours that changes a watched component (refresh the fingerprints).
+- **Status:** built 2026-11-20 (#242), after incident #238; runs whenever the Salesforce step
+  logs in (`SF_SYNC` `plan` or `apply`, with the secrets; nothing at `off`).
+- **Dry run:** none needed: the watch only reads.
+- **Apply:** nothing to apply; what each alert asks for is below.
+- **Verify:** the run's `SF: watch - Apex: ok` and `SF: watch - batches: ok` log lines.
+- **Rollback:** none (reads only); `SF_SYNC=off` stops it with the rest of the Salesforce step.
+
+On 2026-10-26 another team's release overwrote `AttendanceBatchProcessor` and its test class in
+production, and nobody noticed for 3½ weeks (#238; its plan:
+`docs/plans/2026-11-19-processor-restore.md`). Every run with a Salesforce login now reads, as
+GLOW Sync, `Name, Body, LastModifiedDate, LastModifiedById` of `AttendanceBatchProcessor` and
+`AttendanceBatchTriggerTest` (ApexClass) and `AttendanceBatchTrigger` (ApexTrigger), no
+namespace, and compares the sha256 of each body (CRLF → LF, trimmed) with
+`glow/apex_fingerprints.json`, which records our build: deploy `0AfRP000002kdV30AI`, 2026-11-19.
+It also reads the newest `Attendance_Batch__c` whose `Creator__c` starts with `Jotform`. Each
+finding is one ATTENTION item (the run exits 2); the log line `SF: watch - …` gives counts only,
+never a body, and an item names the component, its LastModifiedDate and the modifier's user id
+(an id, never a name: look it up in Setup → Users).
+
+**A component changed** (`SF: the Apex class … has changed in Salesforce`):
+1. Retrieve the live class or trigger into a work folder outside `main`'s `data/` (VPN off):
+   `sf project retrieve start -o glow -m ApexClass:<name> --target-dir <folder>` (`ApexTrigger:`
+   for the trigger).
+2. Compare it with our build: the last deploy of ours (#238's work folder, `after/`) or the
+   fingerprint, `apex_fingerprint` in `glow/salesforce.py`, of the retrieved file against the
+   JSON.
+3. Ask who changed it and why: the modifier's user id names the user in Setup; Ryan asks the
+   vendor (#238: another team's release). Nothing is redeployed before Ryan decides.
+4. To put ours back: #238's plan, `docs/plans/2026-11-19-processor-restore.md` (Rollout:
+   retrieve `before/`, build, check-only, Ryan's go, quick deploy, retrieve `after/` and compare;
+   then the re-send and `Girls_Present__c` steps if batches were processed by the other version).
+5. If the change is ours or accepted: refresh the fingerprints (next paragraph).
+
+**A component missing** (`… is not in Salesforce`): as above; check first that it was not renamed
+or moved into a namespace (a package). Without the trigger no batch is processed at all.
+
+**A body that could not be read** (`… could not read the body`): the runner's user cannot read
+Apex source. GLOW Sync runs as Ryan's own user (an administrator), which should read it; the
+permission needed is API access to `ApexClass` / `ApexTrigger` with their `Body`, typically View
+Setup and Configuration, possibly Author Apex - unverified until the first run reads it. If the
+Run As user changes, give it that permission rather than turning the watch off.
+
+**No Jotform batch for over 48 hours** (`SF: no Jotform attendance batch for over 48 hours`):
+judged on a weekday (UTC) only; clubs also meet at weekends, so a quiet Friday to Monday is
+itself worth a look.
+1. `python3 tools/integration_status.py`: is every live form's Salesforce integration in place?
+2. Is Ryan's user frozen (#238's part B: a VPN froze it, every token was revoked, Jotform's
+   included)? Another administrator unfreezes it; Ryan re-authorises the Jotform connection on
+   each live form, then `integration_status.py` again.
+3. Back-fill what was missed: "Back-fill of attendance into Salesforce", with the window set
+   (`tools/backfill_resolve.py --since … --month-start …`, as #238 did).
+
+**The watch could not check** (`SF: the processor watch could not check the …`): the read itself
+failed (the detail says why: an HTTP status, a refused login). One run: wait for the next; every
+run: as for a gap, the login and the user first.
+
+**Refresh the fingerprints** after any deploy of ours that changes a watched component: retrieve
+the deployed component and follow the `refresh` entry in `glow/apex_fingerprints.json` (the
+digest of the retrieved file, written in groups of 8 hex digits), update its `recorded` line, and
+commit it with the deploy's plan. Never commit the retrieved Apex itself.
 
 # Admin and work log
 

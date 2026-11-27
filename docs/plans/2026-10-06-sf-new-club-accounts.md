@@ -1,7 +1,8 @@
 ---
 title: Salesforce club accounts created automatically for new clubs (BACKLOG 27)
 author: Claude (with Ryan)
-status: in-progress      # accepted by Ryan 2026-10-06; built 2026-10-07 and in main; 2026-10-21: the sync runs as Ryan's own user; 2026-10-22: secrets set, SF_SYNC=plan 12:31 UTC then apply 12:52 UTC (Ryan's go); done when the first automatic creates are checked by hand (BACKLOG 27, ticket #66)
+status: done      # accepted by Ryan 2026-10-06; built 2026-10-07; live in apply since 2026-10-22 (Ryan's go); done 2026-11-26: the first automatic creates checked by hand, CONFIRM_CREATES off (BACKLOG 27, ticket #66)
+done: 2026-11-26
 backlog: 27
 created: 2026-10-06
 intent: none - Ryan's request of 2026-10-06 ("look at doing the salesforce clubs records automatically")
@@ -421,5 +422,9 @@ and run ids only.
   clean check: run 39784745392 then showed 0 need a person. No "would create" body has been
   compared yet, because no new club has appeared. The first creates are checked by hand instead
   (RUNBOOK ATTENTION table, `created … check it by hand (first creates)`).
-- **Still to do:** check the first automatic creates by hand (RUNBOOK ATTENTION table, `created …
-  check it by hand (first creates)`); then set this plan's `status:` to `done`.
+- **2026-11-26: the first creates checked; done.** The 20 accounts the sync created from
+  2026-10-23 to 2026-11-26 were read in Salesforce: each a Club account under its partner's
+  account, Description `created by the automatic sync <date>`, one account per name. The five of
+  2026-11-26 01:38-01:46 UTC (one OMID Foundation club per run) had turned each run red with
+  exit 2 through the "first creates" ATTENTION alone. `CONFIRM_CREATES` is now off, so a create is
+  a log line; every other `SF:` ATTENTION stays.

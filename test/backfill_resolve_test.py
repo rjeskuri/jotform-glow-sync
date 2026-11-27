@@ -686,6 +686,155 @@ class BackfillResolve(unittest.TestCase):
         twice = [submission("9001", {}), submission("9001", {})]
         self.refused(lambda: self.resolve(twice), "the ledger does not balance")
 
+    # ---- the window: --since and --month-start (#238). An incident's back-fill sets them on the
+    # command line; without them it is September's, as before. 2026-11-13 06:00 UTC is 01:00 US
+    # Eastern (EST since 2026-11-01), the clock of Jotform's created_at; 15:40 UTC is 10:40
+    def window(self, subs, **kw):
+        return br.resolve("Africa", AFRICA, subs, questions(), br.rosters_today(plan()), self.roster, **kw)
+
+    def test_since_sets_the_cut_off_and_the_default_stays_2026_09_01(self):
+        created = {"9000": "2026-08-31 23:59:59", "9001": "2026-09-01 00:00:00",
+                   "9002": "2026-11-12 23:59:59", "9003": "2026-11-13 00:59:59",
+                   "9004": "2026-11-13 01:00:00", "9005": "2026-11-15 12:00:00",
+                   "9006": "2026-11-19 10:40:00", "9007": "2026-11-19 10:40:01"}
+        subs = [submission(sid, {} if sid == "9005" else {"10": [AMARA]}, created=when)
+                for sid, when in created.items()]
+        subs.append(submission("9008", {"10": [BEA]}, created="2026-11-01 00:00:00", status="DELETED"))
+        september = ["9001", "9002", "9003", "9004", "9006", "9007"]
+        # since (None: not passed) -> (submissions with rows, with no tick, left out before the cut-off)
+        cases = [(None, september, ["9005"], 1),
+                 ("2026-09-01 00:00:00", september, ["9005"], 1),
+                 ("2026-01-01 00:00:00", ["9000"] + september, ["9005"], 0),
+                 ("2026-11-13 00:59:59", ["9003", "9004", "9006", "9007"], ["9005"], 3),
+                 ("2026-11-13 01:00:00", ["9004", "9006", "9007"], ["9005"], 4),
+                 ("2026-11-15 12:00:01", ["9006", "9007"], [], 6),
+                 ("2026-11-19 10:40:01", ["9007"], [], 7),
+                 ("2027-01-01 00:00:00", [], [], 8)]
+        for since, with_rows, no_tick, before in cases:
+            with self.subTest(since=since):
+                rows, no_ticks, counts = self.window(list(subs), **({} if since is None else {"since": since}))
+                self.assertEqual([r["submission_id"] for r in rows], with_rows)
+                self.assertEqual(no_ticks, no_tick)
+                self.assertEqual((counts["pre_launch"], counts["submissions"], counts["with_ticks"],
+                                  counts["no_ticks"], counts["rows"]),
+                                 (before, len(with_rows) + len(no_tick), len(with_rows), len(no_tick),
+                                  len(with_rows)))
+                # a deleted submission is 'not active' wherever it falls, never 'before the cut-off'
+                self.assertEqual((counts["fetched"], counts["not_active"]), (9, {"DELETED": 1}))
+                times = sorted(created[s] for s in with_rows + no_tick)
+                self.assertEqual((counts["created_first"], counts["created_last"]),
+                                 (times[0], times[-1]) if times else (None, None))
+
+    def test_month_start_sets_the_date_before_which_a_row_is_flagged(self):
+        early = "date_before_2026_09"          # the loader's word (the flag vocabulary), whatever the month
+        dates = {"9001": ("2026", "08", "31"), "9002": ("2026", "09", "01"), "9003": ("2026", "10", "31"),
+                 "9004": ("2026", "11", "01"), "9005": ("2026", "11", "12"), "9006": ("2026", "11", "13"),
+                 "9007": None}
+        subs = [submission(sid, {"10": [AMARA]}, created="2026-11-19 10:00:00", date=d) for sid, d in dates.items()]
+
+        def expected(flagged):
+            return {sid: [early] if sid in flagged else ["date_missing"] if d is None else []
+                    for sid, d in dates.items()}
+        # month_start (None: not passed) -> the submissions whose rows carry the flag
+        cases = [(None, {"9001"}), ("2026-09-01", {"9001"}), ("2026-08-01", set()),
+                 ("2026-11-01", {"9001", "9002", "9003"}), ("2026-11-13", {"9001", "9002", "9003", "9004", "9005"})]
+        for month_start, flagged in cases:
+            with self.subTest(month_start=month_start):
+                rows, _, counts = self.window(list(subs), **({} if month_start is None else {"month_start": month_start}))
+                self.assertEqual({r["submission_id"]: r["flags"] for r in rows}, expected(flagged))
+                self.assertEqual((counts["flags"][early], counts["flag_submissions"][early]), (len(flagged),) * 2)
+                self.assertEqual((counts["submissions"], counts["pre_launch"]), (7, 0))     # the cut-off is since's
+        # the cut-off does not move the date flag, and the two are taken together
+        rows, _, _ = self.window(list(subs), since="2026-11-19 00:00:00")
+        self.assertEqual({r["submission_id"]: r["flags"] for r in rows}, expected({"9001"}))
+        before = submission("9000", {"10": [BEA]}, created="2026-11-12 08:00:00", date=("2026", "10", "01"))
+        rows, _, counts = self.window(list(subs) + [before], since="2026-11-13 01:00:00", month_start="2026-11-01")
+        self.assertEqual({r["submission_id"]: r["flags"] for r in rows}, expected({"9001", "9002", "9003"}))
+        self.assertEqual((counts["pre_launch"], counts["submissions"]), (1, 7))
+
+    def test_main_takes_the_window_from_since_and_month_start_for_every_region(self):
+        early = "date_before_2026_09"
+
+        def subs():
+            return {AFRICA: [submission("9001", {"10": [AMARA]}, created="2026-11-10 09:00:00", date=("2026", "11", "09")),
+                             submission("9002", {"10": [BEA]}, created="2026-11-13 01:00:00", date=("2026", "10", "31")),
+                             submission("9003", {"10": [CHIARA]}, created="2026-11-16 09:00:00", date=("2026", "11", "16")),
+                             submission("9004", {}, created="2026-11-17 09:00:00")],
+                    ASIA: [submission("9101", {"10": [AMARA]}, created="2026-11-12 10:00:00", date=("2026", "11", "12"),
+                                      form=ASIA),
+                           submission("9102", {"10": [BEA]}, created="2026-11-14 10:00:00", date=("2026", "10", "15"),
+                                      form=ASIA)]}
+        # (argv, {region: (left out before the cut-off, in range)}, {submission with rows: its flags});
+        # the flagged run comes first: a run without the flags after it is September's again
+        cases = [(["--since", "2026-11-13 01:00:00", "--month-start", "2026-11-01"],
+                  {"Africa": (1, 3), "Asia": (1, 1)}, {"9002": [early], "9003": [], "9102": [early]}),
+                 ([], {"Africa": (0, 4), "Asia": (0, 2)}, {"9001": [], "9002": [], "9003": [], "9101": [], "9102": []}),
+                 (["--month-start", "2026-11-13"], {"Africa": (0, 4), "Asia": (0, 2)},
+                  {"9001": [early], "9002": [early], "9003": [], "9101": [early], "9102": [early]}),
+                 (["--since", "2026-11-16 09:00:00"], {"Africa": (2, 2), "Asia": (2, 0)}, {"9003": []})]
+        for argv, regions, flags in cases:
+            with self.subTest(argv=" ".join(argv)):
+                out, code, result = self.run_main(FakeJotform(subs()), *argv)
+                self.assertIsNone(code, out)
+                self.assertEqual({r: (result["forms"][r]["pre_launch"], result["forms"][r]["submissions"])
+                                  for r in regions}, regions)
+                self.assertEqual({r["submission_id"]: r["flags"] for r in result["rows"]}, flags)
+                self.assertEqual(result["no_ticks"]["Africa"], ["9004"])
+
+    def test_a_malformed_since_or_month_start_is_refused_before_anything_is_fetched(self):
+        out_path = os.path.join(self.out_dir.name, "resolved.json")
+        good = {"--since": ["2026-11-13 01:00:00", "2026-01-01 00:00:00", "2028-02-29 23:59:59"],
+                "--month-start": ["2026-11-01", "2026-11-13", "2028-02-29"]}
+        # exactly 'yyyy-mm-dd hh:mm:ss' (created_at as Jotform gives it) and 'yyyy-mm-dd' (as a row's
+        # attendance_date): the window is compared as text, so anything else would cut in the wrong place
+        bad = {"--since": ["2026-11-13", "13/11/2026 01:00:00", "2026-11-13T01:00:00", "2026-11-13 01:00",
+                           "2026-11-13 1:00:00", "2026-11-13 01:00:00Z", "2026-02-30 00:00:00",
+                           "2026-11-13 24:00:00", ""],
+               "--month-start": ["2026-11", "2026/11/01", "01-11-2026", "2026-11-1", "20261101",
+                                 "2026-13-01", "2026-02-30", "2026-11-01 00:00:00", ""]}
+        for flag, values in good.items():
+            for value in values:
+                with self.subTest(flag=flag, good=value):
+                    out, code, result = self.run_main(FakeJotform({AFRICA: [submission("9001", {"10": [AMARA]})]}),
+                                                      flag, value)
+                    self.assertIsNone(code, out)
+                    self.assertIsNotNone(result)
+                    os.remove(out_path)
+        for flag, values in bad.items():
+            for value in values:
+                with self.subTest(flag=flag, bad=value):
+                    client, err = FakeJotform({AFRICA: [submission("9001", {"10": [AMARA]})]}), io.StringIO()
+                    with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(err), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        br.main(["--roster", self.roster_csv, "--out", out_path, flag, value], client=client,
+                                plan_of=lambda *a: plan())
+                    self.assertNotIn(stop.exception.code, (None, 0))
+                    self.assertIn(flag, err.getvalue() + str(stop.exception.code))     # says which value is wrong
+                    self.assertEqual(client.asked, [])
+                    self.assertFalse(os.path.exists(out_path))
+
+    def test_the_banner_names_the_window_used(self):
+        # what is printed before the first form's report says the cut-off and the month start this run used
+        shown = ["2026-09-01 00:00:00", "2026-11-13 01:00:00", "2026-10-05 17:30:00"]
+        cases = [([], "2026-09-01 00:00:00", "2026-09-01"),
+                 (["--since", "2026-11-13 01:00:00", "--month-start", "2026-11-01"], "2026-11-13 01:00:00", "2026-11-01"),
+                 (["--since", "2026-10-05 17:30:00"], "2026-10-05 17:30:00", "2026-09-01"),
+                 (["--month-start", "2026-10-01"], "2026-09-01 00:00:00", "2026-10-01")]
+        for argv, since, month_start in cases:
+            with self.subTest(argv=" ".join(argv)):
+                sub = submission("9001", {"10": [AMARA]}, created="2026-11-15 09:00:00", date=("2026", "11", "14"))
+                out, code, _ = self.run_main(FakeJotform({AFRICA: [sub]}), *argv)
+                self.assertIsNone(code, out)
+                banner = out.split("\n== ")[0]
+                self.assertIn(since, banner)
+                self.assertIn(month_start, banner)
+                for other in shown:
+                    if other != since:
+                        self.assertNotIn(other, banner)
+                for other in ("2026-11-01", "2026-10-01"):
+                    if other != month_start:
+                        self.assertNotIn(other, banner)
+
     # ---- what each roster is comes from the sync
     def test_the_club_name_a_roster_sends_today_not_after_the_plan(self):
         changing = plan(sf_name_changes=[{"qid": "10", "club": "Alpha Club", "old": "Alpha Club",
