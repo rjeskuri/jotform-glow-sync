@@ -1723,9 +1723,7 @@ class ReportingDashboardDocs(unittest.TestCase):
         self.assertFalse(others, f"{where}: the rollback restores from this change's `data/sf_dash_reporting_<date>/` "
                                  f"only (or the copy tool's ledger folder), never another retrieve, build or backup: "
                                  f"{others}")
-        # a fallback is said of a restore: since #119 the part defines a formula ("… otherwise \"Late\""), no fallback
-        fallback = [s for s in sentences(flat(raw), ".;") if self.FALLBACK.search(s) and self.RESTORE.search(s)
-                    and not self.STOP.search(s)]
+        fallback = [s for s in sentences(flat(raw), ".;") if self.FALLBACK.search(s) and not self.STOP.search(s)]
         self.assertFalse(fallback, f"{where}: no fallback to another source (if `before/` is missing or differs, stop "
                                    f"and ask; never deploy anything else): {[s[:160] for s in fallback]}")
         self.sweep(raw, where, rollback=True)
