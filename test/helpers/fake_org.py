@@ -26,9 +26,15 @@ LastModifiedDate then too (its Girls_Present__c moved). A PATCH (update) does no
 
 Reads: the exact SOQL shapes the tools are known to send, then any explicit-field SELECT on the four
 sobjects the fake holds (FIELDS) with a WHERE of conditions joined by AND (=, !=, <, <=, >, >=, LIKE,
-IN, NOT IN; text compared as Salesforce does, case ignored; dates and datetimes by their moment),
-GROUP BY, ORDER BY and LIMIT. A field the fake does not hold, OR, or a shape it does not know is an
-AssertionError, never a silent empty answer.
+IN, NOT IN; text compared as Salesforce does, case ignored; dates and datetimes by their moment; a
+condition's field may be CALENDAR_YEAR(<date field>) or CALENDAR_MONTH(<date field>), a blank date
+matching neither), COUNT, COUNT_DISTINCT, MIN and MAX, GROUP BY, ORDER BY and LIMIT. A field the fake
+does not hold, OR, or a shape it does not know is an AssertionError, never a silent empty answer.
+
+An aggregate answer cannot be paged (no queryMore): a GROUP BY query whose answer holds more than
+AGGREGATE_ROWS (2,000) groups is refused whole, as Salesforce answers it (HTTP 400 EXCEEDED_ID_LIMIT,
+"Aggregate query does not support queryMore(), use LIMIT to restrict the results to a single batch",
+seen live 2026-11-27); each such query is kept in `too_big`. LIMIT 2000 or fewer is answered.
 """
 import datetime
 import os
@@ -57,9 +63,13 @@ FIELDS = {
 }
 SOQL_RX = re.compile(r"SELECT (?P<fields>.+?) FROM (?P<sobject>\w+)(?: WHERE (?P<where>.+?))?"
                      r"(?: GROUP BY (?P<group>.+?))?(?: ORDER BY (?P<order>.+?))?(?: LIMIT (?P<limit>\d+))?", re.S)
-COND_RX = re.compile(r"(?P<field>[\w.]+)\s*(?P<op>!=|>=|<=|=|>|<|NOT IN|IN|LIKE)\s*"
+COND_RX = re.compile(r"(?P<field>(?:CALENDAR_YEAR|CALENDAR_MONTH)\(\s*\w+\s*\)|[\w.]+)\s*"
+                     r"(?P<op>!=|>=|<=|=|>|<|NOT IN|IN|LIKE)\s*"
                      r"(?P<value>'(?:[^'\\]|\\.)*'|\([^)]*\)|[\w:+.-]+)", re.I)
-AGG_RX = re.compile(r"(COUNT|COUNT_DISTINCT)\((\w*)\)(?: (\w+))?")
+DATE_FN_RX = re.compile(r"(CALENDAR_YEAR|CALENDAR_MONTH)\(\s*(\w+)\s*\)", re.I)
+AGG_RX = re.compile(r"(COUNT|COUNT_DISTINCT|MIN|MAX)\((\w*)\)(?: (\w+))?")
+GROUP_BY_RX = re.compile(r"\bGROUP BY\b", re.I)
+AGGREGATE_ROWS = 2000        # the most groups one aggregate answer holds: Salesforce cannot page one
 MOMENT_RX = re.compile(r"(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?")
 
 
@@ -159,10 +169,26 @@ def where_filter(where, known, soql):
         raise AssertionError(f"a WHERE this fake org does not understand (conditions joined by AND only): {soql}")
     parsed = []
     for cond in conds:
-        if cond.group("field") not in known:
-            raise AssertionError(f"{cond.group('field')}: not a field of this fake's records: {soql}")
-        parsed.append((cond.group("field"), cond.group("op"), soql_value(cond.group("value"))))
-    return lambda record: all(holds(record.get(field), op, literal) for field, op, literal in parsed)
+        field = cond.group("field")
+        if fn := DATE_FN_RX.fullmatch(field):
+            part, inner = fn.group(1).upper(), fn.group(2)
+            if inner not in known:
+                raise AssertionError(f"{inner}: not a field of this fake's records: {soql}")
+            get = (lambda record, inner=inner, part=part: date_part(record.get(inner), part))
+        elif field in known:
+            get = (lambda record, field=field: record.get(field))
+        else:
+            raise AssertionError(f"{field}: not a field of this fake's records: {soql}")
+        parsed.append((get, cond.group("op"), soql_value(cond.group("value"))))
+    return lambda record: all(holds(get(record), op, literal) for get, op, literal in parsed)
+
+
+def date_part(value, part):
+    """CALENDAR_YEAR / CALENDAR_MONTH of a date or datetime value as a number; None for a blank one."""
+    when = moment(value)
+    if when is None:
+        return None
+    return int(when[:4]) if part == "CALENDAR_YEAR" else int(when[5:7])
 
 
 class FakeOrg:
@@ -184,6 +210,7 @@ class FakeOrg:
         self.drift_update = False    # Salesforce answers 204 but the value read back is the old one
         self.merge_corrections = True    # the processor since 2026-10-24; False: every later batch Failed "Duplicate"
         self.processor_lag = 0       # ticks between a batch's CreatedDate and the first row the processor writes
+        self.too_big = []            # every aggregate query refused for holding more than AGGREGATE_ROWS groups
         # ids from monotonic counters, as Salesforce never reuses one: a test that removes a batch, a row or a
         # contact (history, a drift) must not hand the next record the id of one still held
         self.serial = {"batch": 0, "row": 0, "contact": sum(len(c) for c in self.contacts.values())}
@@ -225,6 +252,14 @@ class FakeOrg:
     def query(self, soql):
         self.seen.append(soql)
         self.read()
+        found = self.answer(soql)
+        if GROUP_BY_RX.search(soql) and len(found) > AGGREGATE_ROWS:
+            self.too_big.append(soql)            # Salesforce: EXCEEDED_ID_LIMIT, nothing answered
+            raise Refused("Salesforce did not answer a read (HTTP 400)")
+        return found
+
+    def answer(self, soql):
+        """What query() answers, before Salesforce's limit on one aggregate answer."""
         for name, text in self.state_queries.items():
             if soql == text:
                 return self.state()[name]
@@ -317,7 +352,13 @@ class FakeOrg:
                 out = dict(zip(group, key))
                 for kind, on, alias in aggregates:
                     values = [x[on] for x in members if x[on] is not None] if on else members
-                    out[alias] = len(set(values)) if kind == "COUNT_DISTINCT" else len(values)
+                    if kind in ("MIN", "MAX"):
+                        if not on:
+                            raise AssertionError(f"{kind}() needs a field: {soql}")
+                        pick = min if kind == "MIN" else max
+                        out[alias] = pick(values, key=lambda v: moment(v) or str(v)) if values else None
+                    else:
+                        out[alias] = len(set(values)) if kind == "COUNT_DISTINCT" else len(values)
                 found.append(out)
             fields = group + [alias for _, _, alias in aggregates]
         if m.group("order"):

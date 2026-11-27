@@ -17,6 +17,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-11-23 | The photo folders already on the Shared Drive re-filed once under Region / Partner / Month | done 2026-11-24 |  | [2026-11-23-refile-photo-folders.md](2026-11-23-refile-photo-folders.md) |
 | 2026-11-23 | Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker | done 2026-11-23 |  | [2026-11-23-partner-fill.md](2026-11-23-partner-fill.md) |
 | 2026-11-20 | On-time Monthly Reports - a formula field, an "On Time by Month" chart on D5, item 18's column | done 2026-11-20 |  | [2026-11-20-sf-on-time.md](2026-11-20-sf-on-time.md) |
+| 2026-11-20 | The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event | done 2026-11-27 |  | [2026-11-20-backfill-two-club-days.md](2026-11-20-backfill-two-club-days.md) |
 | 2026-11-19 | Club-level attendance by week for photo verification - viewer filters on Attendance By Club By Date, a new Girls Present by Club and Week matrix | done 2026-11-19 |  | [2026-11-19-sf-club-week-girls.md](2026-11-19-sf-club-week-girls.md) |
 | 2026-11-19 | Restore the attendance processor after another team's release overwrote it on 2026-10-26 | done 2026-11-19 |  | [2026-11-19-processor-restore.md](2026-11-19-processor-restore.md) |
 | 2026-11-19 | Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name | in-progress |  | [2026-11-19-photo-folders-partner-month.md](2026-11-19-photo-folders-partner-month.md) |

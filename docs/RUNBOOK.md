@@ -5947,6 +5947,12 @@ folder to every `tools/sf_backfill.py` command with `--dir`, whose default is
 `data/backfill_2026-09`), then follow the procedure as run:
 [plan](plans/2026-09-30-september-backfill.md#from-the-runbook-moved-2026-10-09).
 
+A special event (`Special Event - <type>`, any type `glow.sync.is_special_event` accepts, one no longer
+on the forms included) has no session week by design: its session with a blank week is sent with
+`Module_Week__c` blank and its year ([special events](plans/2026-10-13-special-events.md), Decisions 1;
+ticket #244). Any other module without a usable week, and an event without a usable year, stays held
+`module_not_usable`.
+
 **Before anything talks to Salesforce from the Mac: VPN off.** Salesforce freezes a user whose
 app or API connection comes from an anonymising VPN and revokes all their tokens, the Jotform
 connection's included (it happened 2026-09-30 12:16 UTC). Only another administrator can
@@ -6017,6 +6023,61 @@ they are (history); a failed batch is never copied twice.
   rows), then the copies (`batch_id` in `resend_ledger.csv`); set each original's
   `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
   `close <failed id> --removed` for each.
+
+### Correction for a day Salesforce already has (`merge`)
+
+- **When:** a back-fill session whose club and day Salesforce already has, with a `Success` batch and
+  its attendance rows, while the reports tick girls that day lacks (`plan` holds it
+  `salesforce_has_different_count` or skips it `already_in_salesforce`). Never failed as `Duplicate`,
+  so `resend` does not see it. On Ryan's word the session goes as one batch, which the processor
+  (since 2026-10-24, ticket #108) merges into the day's original batch.
+- **Status:** built 2026-11-20 (ticket #244, [plan](plans/2026-11-20-backfill-two-club-days.md)); run live once, 2026-11-20 (AusCam Club 3, 8 rows; [Result](plans/2026-11-20-backfill-two-club-days.md#result)).
+- **Dry run:** the clause `merge` on the session's line in `decisions.csv`, `plan`, then
+  `python3 tools/sf_backfill.py --dir <folder> merge --vpn-off` (it reads Salesforce, so `--vpn-off` too).
+- **Apply:** `merge --apply --vpn-off --only '<key>'` (quoted: a key holds a `|`), Ryan's go.
+- **Verify:** every merge is read back as it is sent; `sf_backfill.py status`;
+  `tools/sf_girls_present.py check`.
+- **Rollback:** by id from `merge_ledger.csv` and `merge_added.csv` (below).
+
+`decisions.csv` takes the clause `merge` (no value; with `use` and `accept`, never with `skip`). A
+`merge` session whose club and day the snapshot has with a `Success` batch and attendance rows is
+neither held for its count nor skipped: every other hold applies as for any session, and
+`club_has_earlier_contacts` always does (the day's girls are not this run's), so the line reads
+`merge; accept club_has_earlier_contacts` plus whatever else Ryan releases. On a day without a
+`Success` batch with rows it is held `merge_without_original`, which `accept` cannot release. A
+planned merge is in `plan.json`'s `merges`, never in the `send` queue; `plan` counts them.
+
+`merge` reads each planned merge's club and day live and predicts by the processor's merge rule, as
+`resend` does: one line per merge (its key, club, date, the original's Name and Id, names ticked / girls
+to add / new contacts), or `skipped, <reason>` - `no_success_original`, `original_not_mergeable` (a
+`Partner report`, or no rows of its own), `module_differs` (the module only, case ignored), `adds_nobody`.
+A skipped merge sends nothing, `--apply` exits 0 on it, and it stays planned for a later run.
+
+`--apply` sends one batch per merge, in the plan's order: the session's names, module, week (blank for
+a special event) and year, no fuzzy matching, `Creator__c` `Jotform back-fill merge <club id>
+<submission ids>` (its marker). It reads the club and day again right before each insert and sends
+nothing for a merge whose prediction changed (a live correction got there first), so it has no
+`MAX_AGE_HOURS` limit on the fetched submissions: what it adds is read live, not taken from the fetch.
+It reads each batch back as `resend` reads a copy (`Success` `merged into <original id>`, no rows or
+count of its own, the original grown by exactly the predicted rows inside the batch's window, the club
+by exactly the predicted contacts, the original's `Girls_Present__c` its rows, no other batch of the
+day inside the window) and also that the rows went to the predicted girls: the existing contacts
+predicted for girls who had one (kept in `merge_ledger.csv` as a digest, never as ids), the rest
+contacts made in the window. Anything else is `CHECK`: the run stops and `--apply` refuses until
+`close <key> --accepted` (a CHECK only) or `close <key> --removed` (removed by hand: the next `--apply`
+predicts it live and sends it again). A lost answer or read-back is `unknown`, settled by its marker
+before the next `--apply` sends (never by club and day; after `SETTLE_AFTER_MINUTES` without its batch,
+`not_saved`); an HTTP 4xx is `not_saved` and nothing more is sent. A `not_saved` merge is a candidate
+again on the next `--apply`, without `--retry`. A merge `ok` or `accepted` is never sent again, not
+after a new snapshot and plan either. `--only <key>` sends one, `--limit N` the first N the day would
+take. A merge never writes `ledger.csv` or `sent_names.json`.
+
+- **Rollback** (only with Ryan's go): `merge_added.csv` lists, per merge (its key and batch id), every
+  attendance row it added to the original and every contact it created. Delete those rows, then each
+  listed contact only while it carries no other attendance row (master-detail: deleting a contact
+  deletes its rows), then the merge batch (`batch_id` in `merge_ledger.csv`); set the original's
+  `Girls_Present__c` back to the count of its own rows (`tools/sf_girls_present.py check`), and
+  `close <key> --removed`.
 
 ## Attendance processor watch
 

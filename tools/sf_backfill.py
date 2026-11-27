@@ -17,25 +17,30 @@ reads every one back (status, rows, girls, Girls_Present__c).
   resend    the corrections the processor failed whole as "Duplicate" before 2026-10-24 (ticket #109):
             each re-sent as a copy, so the processor since merges its missing girls into the day's
             original batch; dry run by default, --apply writes one copy per request and verifies it
+  merge     the sessions decisions.csv marks `merge` (ticket #244): a club and day Salesforce already
+            has, sent on Ryan's word as one batch the processor merges into the day's original; what
+            each adds is predicted live; dry run by default, --apply writes one per request and
+            verifies it (merge_ledger.csv, merge_added.csv)
   close     offline: record that a batch a ledger has open was removed by hand, or accepted
   status    what the ledgers say was sent, and what a rollback would have to remove
 
 Everything it reads and writes lives in the back-fill folder under data/ (never committed), owner
 only: resolved.json, plan.json and sent_names.json hold girls' names; sf_state.json, held.csv,
-ledger.csv, created_contacts.csv, resend_ledger.csv and resend_added.csv (record ids) do not. It
-prints counts, club names, dates, ids and statuses - never a girl's name, and never the text of a
-Salesforce status message (only its kind). Only `resend` reads names from Salesforce (the names a
-failed batch ticked, its club's participants' names), to predict in memory what a copy adds; they
-are never printed or written.
+ledger.csv, created_contacts.csv, resend_ledger.csv, resend_added.csv, merge_ledger.csv and
+merge_added.csv (record ids) do not. It prints counts, club names, dates, ids and statuses - never a
+girl's name, and never the text of a Salesforce status message (only its kind). Only `resend` and
+`merge` read names from Salesforce (the names a failed batch ticked, its club's participants'
+names), to predict in memory what a batch adds; they are never printed or written.
 
 Salesforce access is the Salesforce CLI's stored login (`sf org login web --alias glow`, made by
 Ryan); the token is read into memory and goes to curl on stdin, never on a command line or to disk.
-Salesforce freezes a user whose API connection comes through a VPN, so snapshot, send --apply
-and resend (both modes: its dry run reads Salesforce) refuse without --vpn-off.
+Salesforce freezes a user whose API connection comes through a VPN, so snapshot, send --apply,
+resend and merge (both modes: their dry runs read Salesforce) refuse without --vpn-off.
 """
 import argparse
 import csv
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -51,6 +56,7 @@ from glow.private_files import (STAMP, Ledger, keep_private, last_rows, load_jso
 from glow.salesforce import (ACCOUNT_ID, CLUB_RECORD_TYPE, ON_HOLD_ACCOUNTS, Org, Refused,   # noqa: E402
                              add_vpn_flag, apex_trim, error_codes, has_invisible, plain, positive, quoted,
                              require_vpn_off, sf_match)
+from glow.sync import is_special_event   # noqa: E402
 
 DEFAULT_DIR = os.path.join(REPO, "data", "backfill_2026-09")
 SCOPE_START = datetime.date(2026, 9, 1)      # attendance dated before the launch is held, not sent
@@ -90,6 +96,24 @@ RESEND_COLS = ["when_utc", "done_utc", "failed_id", "failed_name", "original_id"
 ADDED_COLS = ["failed_id", "batch_id", "kind", "record_id", "uncertain"]
 COPIED = ("Account_Name__c", "Attendance_Date__c", "Contact_IDs__c", "Module__c", "Module_Week__c", "Module_Year__c",
           "enable_fuzzy_matching__c")
+# merge (ticket #244): a session of a club and day Salesforce has, sent on Ryan's word (decisions.csv `merge`)
+MERGE_CREATOR = f"{CREATOR} merge"           # + the club and the reports: a merge's marker
+MERGE_COLS = ["when_utc", "done_utc", "key", "region", "account_id", "account_name", "attendance_date", "submissions",
+              "original_id", "original_name", "names", "adds_expected", "contacts_expected", "existing_digest",
+              "participants_before", "original_rows_before", "batch_id", "batch_name", "status", "outcome", "rows_added",
+              "contacts_created", "participants_after", "note"]
+MERGE_ADDED_COLS = ["key", "batch_id", "kind", "record_id", "uncertain"]
+
+
+class Merging:
+    """What a resend copy and a merge share - one batch the processor merges into its day's original, sent,
+    read back and settled the same way - and what differs: its ledger and rollback list, the column that
+    names it there, its marker, the word for it and the command that sends it."""
+
+    def __init__(self, ledger, added, ident, noun, command, marker, removed_again):
+        self.ledger, self.added, self.ident, self.noun, self.command = ledger, added, ident, noun, command
+        self.marker = marker                 # row -> the Creator__c it carries
+        self.removed_again = removed_again   # a batch closed --removed is a candidate again (merge) or never (resend)
 
 
 class Paths:
@@ -106,23 +130,67 @@ class Paths:
         self.contacts = os.path.join(folder, "created_contacts.csv")
         self.resend_ledger = Ledger(os.path.join(folder, "resend_ledger.csv"), RESEND_COLS)
         self.resend_added = Ledger(os.path.join(folder, "resend_added.csv"), ADDED_COLS)
+        self.merge_ledger = Ledger(os.path.join(folder, "merge_ledger.csv"), MERGE_COLS)
+        self.merge_added = Ledger(os.path.join(folder, "merge_added.csv"), MERGE_ADDED_COLS)
+        self.resending = Merging(self.resend_ledger, self.resend_added, "failed_id", "copy", "resend",
+                                 lambda row: resend_marker(row["failed_id"]), removed_again=False)
+        self.merging = Merging(self.merge_ledger, self.merge_added, "key", "batch", "merge",
+                               lambda row: marker(row, MERGE_CREATOR), removed_again=True)
 
 # ---- snapshot ------------------------------------------------------------------------------------
+AGGREGATE_ROWS = 2000    # the most groups Salesforce answers to one aggregate query: it cannot page one
 STATE_QUERIES = {
     "accounts": "SELECT Id, Name, RecordTypeId, ParentId FROM Account ORDER BY Id",
     "batches": "SELECT Id, Name, Account__c, Attendance_Date__c, Processing_Status__c "
                "FROM Attendance_Batch__c ORDER BY CreatedDate",
-    "attendance": "SELECT Account__c, Attendance_Date__c, COUNT(Id) n FROM Attendance__c "
+    # club x day passed AGGREGATE_ROWS (2026-11-27): read one window of attendance_windows() at a time
+    "attendance": "SELECT Account__c, Attendance_Date__c, COUNT(Id) n FROM Attendance__c WHERE {window} "
                   "GROUP BY Account__c, Attendance_Date__c",
     "participants": "SELECT AccountId, COUNT(Id) n FROM Contact WHERE Contact_Role__c = 'Participant' "
                     "GROUP BY AccountId",
 }
+ATTENDANCE_SPAN = "SELECT MIN(Attendance_Date__c) lo, MAX(Attendance_Date__c) hi FROM Attendance__c"
+
+
+def aggregate(org, soql):
+    """An aggregate query's answer. One of AGGREGATE_ROWS groups or more is refused: Salesforce answers no
+    more in one (EXCEEDED_ID_LIMIT above it), so an answer that size may be cut short."""
+    found = plain(org.query(soql))
+    if len(found) >= AGGREGATE_ROWS:
+        raise Refused(f"Salesforce answered {len(found)} groups to one read, the most it answers at once, so it "
+                      f"may be cut short - nothing written; this read needs smaller windows: {soql[:90]}")
+    return found
+
+
+def attendance_windows(org):
+    """The WHERE of each attendance read: every calendar month from the first Attendance_Date__c to the
+    last, then the rows without a date."""
+    span = plain(org.query(ATTENDANCE_SPAN))
+    if len(span) != 1:
+        raise Refused(f"Salesforce answered {len(span)} rows to the attendance span read - nothing written")
+    lo, hi = span[0].get("lo"), span[0].get("hi")
+    windows = []
+    if lo is not None or hi is not None:
+        first, last = iso(lo), iso(hi)
+        if first is None or last is None or first > last:
+            raise Refused("Salesforce gave the first and last attendance dates in a shape this tool does not "
+                          "know - nothing written")
+        month = first.replace(day=1)
+        while month <= last:
+            after = (month + datetime.timedelta(days=31)).replace(day=1)
+            windows.append(f"Attendance_Date__c >= {month} AND Attendance_Date__c < {after}")
+            month = after
+    return windows + ["Attendance_Date__c = null"]
 
 
 def cmd_snapshot(args, paths, org):
+    """Reads everything before it writes anything: a read that fails or is refused leaves the folder as it was."""
     state = {"read_at_utc": "", "source": f"sf CLI login '{org.alias}'"}
-    for name, soql in STATE_QUERIES.items():
-        state[name] = plain(org.query(soql))
+    state["accounts"] = plain(org.query(STATE_QUERIES["accounts"]))
+    state["batches"] = plain(org.query(STATE_QUERIES["batches"]))
+    state["attendance"] = [found for window in attendance_windows(org)
+                           for found in aggregate(org, STATE_QUERIES["attendance"].format(window=window))]
+    state["participants"] = aggregate(org, STATE_QUERIES["participants"])
     state["read_at_utc"] = stamp()
     save_private(paths.state, json.dumps(state, indent=1))
     print(f"snapshot: {len(state['accounts'])} accounts, {len(state['batches'])} batches, "
@@ -203,9 +271,10 @@ def check_state(state):
 
 
 def read_decisions(path):
-    """key -> {"skip", "use": [ids], "date", "accept": {reasons}}. decisions.csv is Ryan's:
+    """key -> {"skip", "use": [ids], "date", "accept": {reasons}, "merge"}. decisions.csv is Ryan's:
     `key,decision`, the decision being one or more of  skip | use <id>[+<id>] | date yyyy-mm-dd |
-    accept <reason>[+<reason>]  joined with ';'."""
+    accept <reason>[+<reason>] | merge  joined with ';'. `merge`: send the session although Salesforce
+    has the club and day, for the processor to merge into the day's original batch (the `merge` command)."""
     out = {}
     if not os.path.exists(path):
         return out
@@ -223,7 +292,7 @@ def read_decisions(path):
         if any(cell.strip() for cell in line[2:]):
             raise Refused(f"decisions.csv: {key}: more than two columns - join several ids or reasons with '+', "
                           "several clauses with ';'")
-        entry, words = {"skip": False, "use": [], "date": None, "accept": set()}, []
+        entry, words = {"skip": False, "use": [], "date": None, "accept": set(), "merge": False}, []
         for clause in [c.strip() for c in text.split(";") if c.strip()]:
             word, _, value = clause.partition(" ")
             value = value.strip()
@@ -243,10 +312,12 @@ def read_decisions(path):
                 if entry["accept"] - RELEASABLE:
                     raise Refused(f"decisions.csv: {key}: '{', '.join(sorted(entry['accept'] - RELEASABLE))}' cannot "
                                   "be accepted - its cause has to be removed")
+            elif word == "merge" and not value:
+                entry["merge"] = True
             else:
                 raise Refused(f"decisions.csv: '{clause}' for {key} is not one of skip | use <submission id> | "
-                              "date yyyy-mm-dd | accept <reason>")
-        if not text or (entry["skip"] and (entry["use"] or entry["date"] or entry["accept"])):
+                              "date yyyy-mm-dd | accept <reason> | merge")
+        if not text or (entry["skip"] and (entry["use"] or entry["date"] or entry["accept"] or entry["merge"])):
             raise Refused(f"decisions.csv: {key}: {'no decision' if not text else 'skip cannot be combined'}")
         out[key] = entry
     return out
@@ -348,8 +419,9 @@ def as_number(value):
 
 
 def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, dup_rule_ok=False):
-    """(queue, held, skipped, notes): the sessions to send in order, the held ones with EVERY
-    reason that holds them, the skipped ones, and counts for the report."""
+    """(queue, merges, held, skipped, notes): the sessions to send in order, the planned merges (a
+    `merge` session of a day Salesforce has with a Success batch and rows; never in the queue), the held
+    ones with EVERY reason that holds them, the skipped ones, and counts for the report."""
     by_length = accounts_by_length(state["accounts"])
     batches_on = {}
     for batch in state["batches"]:
@@ -422,6 +494,7 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
         rows = sorted(group["rows"], key=lambda r: (r["created_at"], r["submission_id"]))
         mine = [decisions[k] for k in sorted(group["origins"] | {key}) if k in decisions]
         accept = set().union(*(d["accept"] for d in mine)) if mine else set()
+        merge = any(d["merge"] for d in mine)
         subs = {r["submission_id"] for r in rows}
         moved_from = sorted(group["origins"] - {key})
 
@@ -452,7 +525,11 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
                  + " (was its date or its club changed since?)")
             continue
         there, n_rows = batches_on.get((acc["Id"], date), []), rows_on.get((acc["Id"], date), 0)
-        if there or n_rows:
+        if merge and not (n_rows and any(b["Processing_Status__c"] == OK_STATUS for b in there)):
+            stop(["merge_without_original"], f"{len(there)} batch(es), {n_rows} attendance rows: 'merge' needs a "
+                 "Success batch and attendance rows for this club and day for the processor to merge into")
+            continue
+        if (there or n_rows) and not merge:
             ticked = len({fold(n) for r in rows for n in r["names"]})
             if n_rows and any(b["Processing_Status__c"] == OK_STATUS for b in there):
                 if n_rows == ticked:
@@ -501,9 +578,13 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
             swapped = datetime.date(day.year, day.day, day.month) if early and day.day <= 12 else None
             if swapped and SCOPE_START <= swapped <= created:
                 details.append("day and month may be swapped")
-        week, year = as_number(rows[0].get("module_week")), as_number(rows[0].get("module_year"))
+        week_text = "" if rows[0].get("module_week") is None else str(rows[0]["module_week"]).strip()
+        week, year = as_number(week_text), as_number(rows[0].get("module_year"))
         module = str(rows[0].get("module") or "").strip()
-        if week is None or year is None or not module or len(module) > 255:
+        # a special event has no session week by design (docs/plans/2026-10-13-special-events.md, Decisions 1):
+        # sent with Module_Week__c blank; any other module needs its week
+        no_week_needed = not week_text and is_special_event(module)
+        if (week is None and not no_week_needed) or year is None or not module or len(module) > 255:
             reasons.append("module_not_usable")
         names, seen = [], set()
         for row in rows:
@@ -520,13 +601,13 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
                            "submissions": [r["submission_id"] for r in rows], "set_aside": set_aside,
                            "names": names, "module": module, "module_week": week, "module_year": year,
                            "reasons": list(dict.fromkeys(reasons)), "details": details, "accept": accept,
-                           "rows": rows})
+                           "rows": rows, "merge": merge})
     for row in resolved["rows"]:
         row.pop("_origin", None)
 
     # 2. per club, in date order: is every participant this tool's own, how many girls each batch
     #    creates, and which batches must wait for an earlier one
-    queue, by_account = [], {}
+    queue, merges, by_account = [], [], {}
     for session in candidates:
         by_account.setdefault(session["account_id"], []).append(session)
     for account_id, mine in by_account.items():
@@ -554,7 +635,7 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
             session["new_expected"] = len(fresh) if exact else len(session["names"])
             session["new_exact"] = exact
             reasons, details = session.pop("reasons"), session.pop("details")
-            accept, rows = session.pop("accept"), session.pop("rows")
+            accept, rows, merge = session.pop("accept"), session.pop("rows"), session.pop("merge")
             if not exact:
                 reasons.append("club_has_earlier_contacts")
                 details.append(f"{before} participants, not all made by this run: a girl spelled differently "
@@ -576,24 +657,24 @@ def build_plan(resolved, state, decisions, ledger, sent_names, max_new=MAX_NEW, 
                 continue
             session["accepted"] = sorted(set(reasons) & accept)
             known |= {fold(n) for n in session["names"]}
-            queue.append(session)
+            (merges if merge else queue).append(session)
     first_size = {}
     for session in queue:
         first_size.setdefault(session["account_id"], len(session["names"]))
     queue.sort(key=lambda s: (first_size[s["account_id"]], s["account_name"], s["account_id"], s["attendance_date"]))
-    return queue, held, skipped, notes
+    return queue, merges, held, skipped, notes
 
 
 def cmd_plan(args, paths):
     resolved = check_resolved(load_json(paths.resolved, "the resolver's output"))
     state = check_state(load_json(paths.state, "the Salesforce snapshot"))
-    queue, held, skipped, notes = build_plan(resolved, state, read_decisions(paths.decisions),
-                                             paths.ledger.read(), read_sent_names(paths.sent_names),
-                                             max_new=args.max_new, dup_rule_ok=args.dup_rule_ok)
+    queue, merges, held, skipped, notes = build_plan(resolved, state, read_decisions(paths.decisions),
+                                                     paths.ledger.read(), read_sent_names(paths.sent_names),
+                                                     max_new=args.max_new, dup_rule_ok=args.dup_rule_ok)
     plan = {"made_at_utc": stamp(), "resolved_sha256": sha256(paths.resolved),
             "decisions_sha256": sha256(paths.decisions), "resolved_fetched_at_utc": resolved["fetched_at_utc"],
             "state_read_at_utc": state["read_at_utc"], "closed_by_hand": closed_by_hand(paths.ledger.read()),
-            "sessions": queue}
+            "sessions": queue, "merges": merges}
     save_private(paths.plan, json.dumps(plan, indent=1, ensure_ascii=False))
     with open_private(paths.held, "w") as fh:
         writer = csv.DictWriter(fh, fieldnames=HELD_COLS, lineterminator="\n")
@@ -630,6 +711,10 @@ def cmd_plan(args, paths):
     released = sum(1 for s in queue if s["accepted"])
     if released:
         print(f"  {released} of them go on Ryan's 'accept'")
+    if merges:
+        print(f"to merge into a day Salesforce has ('merge'): {len(merges)} batches, "
+              f"{sum(len(s['names']) for s in merges)} names ticked, {len({s['account_id'] for s in merges})} clubs - "
+              "the `merge` command predicts what each adds, live")
     for reason in sorted({s["reason"] for s in skipped}):
         print(f"skipped, {reason}: {sum(1 for s in skipped if s['reason'] == reason)}")
     print(f"held for a decision: {len(held)} ({rel(paths.held)})")
@@ -645,10 +730,35 @@ def cmd_plan(args, paths):
 
 
 # ---- send ----------------------------------------------------------------------------------------
-def marker(session_or_row):
-    """What marks a batch as this tool's and as this session's: the club and the reports it carries."""
+def marker(session_or_row, creator=CREATOR):
+    """What marks a batch as this tool's and as this session's: the club and the reports it carries
+    (a merge's: MERGE_CREATOR, so it is never taken for send's batch of the same reports)."""
     subs = session_or_row["submissions"]
-    return f"{CREATOR} {session_or_row['account_id']} {'+'.join(subs) if isinstance(subs, list) else subs}"[:255]
+    return f"{creator} {session_or_row['account_id']} {'+'.join(subs) if isinstance(subs, list) else subs}"[:255]
+
+
+def load_plan(paths):
+    plan = load_json(paths.plan, "the plan")
+    if plan.get("resolved_sha256") != sha256(paths.resolved) or plan.get("decisions_sha256") != sha256(paths.decisions):
+        raise Refused("resolved.json or decisions.csv changed after the plan was made - run plan again")
+    return plan
+
+
+def check_entry(session):
+    """A plan entry's club id, date and names, checked before they go into SOQL or to Salesforce."""
+    names = session.get("names")
+    if not ACCOUNT_ID.fullmatch(str(session.get("account_id") or "")) or iso(session.get("attendance_date")) is None \
+            or not isinstance(names, list) or not names or any(not isinstance(n, str) or bad_name(n) for n in names):
+        raise Refused(f"{session.get('key')}: the plan entry is not usable - run plan again")
+
+
+def check_club(org, session):
+    """The club name still leads to exactly its one Club account (the processor books a batch by name)."""
+    found = org.query(f"SELECT Id, Name, RecordTypeId, ParentId FROM Account WHERE Name = {quoted(session['account_name'])}")
+    if len(found) != 1 or found[0]["Id"] != session["account_id"] or found[0]["RecordTypeId"] != CLUB_RECORD_TYPE \
+            or not found[0].get("ParentId"):
+        raise Refused(f"{session['key']}: the club name no longer leads to exactly its one Club account "
+                      f"({len(found)} found) - nothing sent; snapshot and plan again")
 
 
 def body_of(session):
@@ -761,14 +871,8 @@ def send_one(org, session, ledger, paths):
     """Prove, record, insert, read back, record. Raises Refused at the first thing not as planned."""
     acc_id, date, key = session["account_id"], session["attendance_date"], session["key"]
     names = session["names"]
-    if not ACCOUNT_ID.fullmatch(acc_id) or iso(date) is None or not isinstance(names, list) or not names \
-            or any(not isinstance(n, str) or bad_name(n) for n in names):
-        raise Refused(f"{key}: the plan entry is not usable - run plan again")
-    found = org.query(f"SELECT Id, Name, RecordTypeId, ParentId FROM Account WHERE Name = {quoted(session['account_name'])}")
-    if len(found) != 1 or found[0]["Id"] != acc_id or found[0]["RecordTypeId"] != CLUB_RECORD_TYPE \
-            or not found[0].get("ParentId"):
-        raise Refused(f"{key}: the club name no longer leads to exactly its one Club account "
-                      f"({len(found)} found) - nothing sent; snapshot and plan again")
+    check_entry(session)
+    check_club(org, session)
     if org.count(f"SELECT COUNT() FROM Attendance_Batch__c WHERE Account__c = {quoted(acc_id)} "
                  f"AND Attendance_Date__c = {date}") or \
             org.count(f"SELECT COUNT() FROM Attendance__c WHERE Account__c = {quoted(acc_id)} "
@@ -835,9 +939,7 @@ def settle(org, row, ledger, paths):
 
 
 def cmd_send(args, paths, org):
-    plan = load_json(paths.plan, "the plan")
-    if plan.get("resolved_sha256") != sha256(paths.resolved) or plan.get("decisions_sha256") != sha256(paths.decisions):
-        raise Refused("resolved.json or decisions.csv changed after the plan was made - run plan again")
+    plan = load_plan(paths)
     ledger = paths.ledger.read()
     stuck = sorted(k for k, r in last_rows(ledger, "key").items() if r["status"] in OPEN)
     if stuck:
@@ -1022,29 +1124,37 @@ def resend_entries(org, since, ledger):
     return entries
 
 
-def find_resend_batch(org, failed_id):
-    """The copy of a failed batch: by its marker, never by club and day."""
-    found = org.query(f"SELECT Id FROM Attendance_Batch__c WHERE Creator__c = {quoted(resend_marker(failed_id))}")
+def find_merging(org, kind, row):
+    """A resend copy or a merge batch: by its marker, never by club and day."""
+    found = org.query(f"SELECT Id FROM Attendance_Batch__c WHERE Creator__c = {quoted(kind.marker(row))}")
     if len(found) > 1:
-        raise Refused(f"{failed_id}: Salesforce holds {len(found)} copies with this marker - look at them in "
-                      "Salesforce before anything else is sent")
+        raise Refused(f"{row[kind.ident]}: Salesforce holds {len(found)} batches with this {kind.noun}'s marker - look "
+                      "at them in Salesforce before anything else is sent")
     return found[0]["Id"] if found else None
 
 
-def verify_resend(org, row, batch_id, paths, ledger):
-    """Read a copy back and close its ledger entry as ok or CHECK: merged into its day's original, no
-    rows and no count of its own, exactly the rows and contacts predicted, the original's count its rows."""
-    fid, oid, acc = row["failed_id"], row["original_id"], row["account_id"]
+def id_digest(ids):
+    """A fingerprint of a set of record ids: what merge_ledger.csv keeps of the existing contacts a merge
+    should book its rows on, so the read-back can compare WHICH girls without a file listing records
+    from before the merge (a rollback list never names one)."""
+    return hashlib.sha256("+".join(sorted(ids)).encode()).hexdigest()[:16]
+
+
+def verify_merging(org, kind, row, batch_id, ledger):
+    """Read a resend copy or a merge batch back and close its ledger entry as ok or CHECK: merged into its
+    day's original, no rows and no count of its own, exactly the rows and contacts predicted (for a merge
+    also on which existing contacts), the original's count its rows. `row` is its 'sending' row."""
+    ident, oid, acc, noun = row[kind.ident], row["original_id"], row["account_id"], kind.noun
     found = org.query("SELECT Id, Name, Processing_Status__c, Status_Message__c, Account__c, CreatedDate, "
                       f"LastModifiedDate, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(batch_id)}")
     if len(found) != 1:
-        raise Refused(f"{fid}: the copy {batch_id} is no longer in Salesforce - if it was removed on purpose: "
-                      f"close {fid} --removed")
+        raise Refused(f"{ident}: the {noun} {batch_id} is no longer in Salesforce - if it was removed on purpose: "
+                      f"close {ident} --removed")
     batch = found[0]
-    # the copy's window: its CreatedDate to its LastModifiedDate (the processor's status update, its last write;
+    # the batch's window: its CreatedDate to its LastModifiedDate (the processor's status update, its last write;
     # nothing promises one timestamp for the whole transaction). What the original gained inside it is the
-    # copy's, unless another batch of the club and day was created inside it too (CHECK, below); a correction
-    # merged into the same original later falls after it, and its rows never reach resend_added.csv
+    # batch's, unless another batch of the club and day was created inside it too (CHECK, below); a correction
+    # merged into the same original later falls after it, and its rows never reach the rollback list
     window = (f"CreatedDate >= {batch['CreatedDate'][:19]}Z AND "
               f"CreatedDate <= {(batch.get('LastModifiedDate') or batch['CreatedDate'])[:19]}Z")
     original = org.query(f"SELECT Id, Girls_Present__c FROM Attendance_Batch__c WHERE Id = {quoted(oid)}")
@@ -1067,42 +1177,44 @@ def verify_resend(org, row, batch_id, paths, ledger):
     elif message not in (f"merged into {oid}", f"merged into {oid[:15]}"):
         wrong.append("merged into another batch than its day's original")
     if batch["Account__c"] != row["account_id"]:
-        wrong.append("the copy landed on another account")
+        wrong.append(f"the {noun} landed on another account")
     if own_rows or batch.get("Girls_Present__c") is not None:
-        wrong.append(f"the copy has {own_rows} rows and a count ({number_text(batch.get('Girls_Present__c'))}) of its own")
+        wrong.append(f"the {noun} has {own_rows} rows and a count ({number_text(batch.get('Girls_Present__c'))}) of its own")
     if len(added) != adds or len(girls) != adds:
         wrong.append(f"{len(added)} rows for {len(girls)} girls added to the original, {adds} predicted")
     present = original[0].get("Girls_Present__c") if original else None
     if present != original_rows:
         wrong.append(f"the original's Girls_Present__c is {number_text(present)}, it has {original_rows} rows")
     if grew != new or len(created) != new:
-        wrong.append(f"the club grew by {grew} participants, {len(created)} made by the copy, {new} predicted")
+        wrong.append(f"the club grew by {grew} participants, {len(created)} made by the {noun}, {new} predicted")
+    if row.get("existing_digest") is not None and id_digest(set(girls) - set(created)) != row["existing_digest"]:
+        wrong.append("the rows added went to other existing contacts than the girls predicted to have one")
     if others:
-        wrong.append(f"{len(others)} other batch(es) of the club and day created inside the copy's window")
-    listed = {(r["kind"], r["record_id"]) for r in paths.resend_added.read()}
-    for kind, ids in (("attendance", [r["Id"] for r in added]), ("contact", created)):   # the rollback list first
+        wrong.append(f"{len(others)} other batch(es) of the club and day created inside the {noun}'s window")
+    listed = {(r["kind"], r["record_id"]) for r in kind.added.read()}
+    for what, ids in (("attendance", [r["Id"] for r in added]), ("contact", created)):   # the rollback list first
         for record_id in ids:
-            if (kind, record_id) not in listed:
-                paths.resend_added.append({"failed_id": fid, "batch_id": batch_id, "kind": kind, "record_id": record_id,
-                                           "uncertain": "yes" if others else ""})
+            if (what, record_id) not in listed:
+                kind.added.append({kind.ident: ident, "batch_id": batch_id, "kind": what, "record_id": record_id,
+                                   "uncertain": "yes" if others else ""})
     closed = dict(row, done_utc=stamp(), batch_id=batch_id, batch_name=batch["Name"], outcome=outcome,
                   rows_added=len(added), contacts_created=len(created), participants_after=after,
                   status="CHECK" if wrong else "ok", note="; ".join(wrong))
-    paths.resend_ledger.append(closed, ledger)
+    kind.ledger.append(closed, ledger)
     if wrong:
-        where = rel(paths.resend_added.path)
+        where = rel(kind.added.path)
         if others or not added or len(added) < max(adds, growth) or len(created) < max(new, grew):
             listing = (f"the rollback list {where} may be incomplete"
                        + (" or may hold the other batch's rows (marked uncertain)" if others else "")
-                       + f": it holds {len(added)} rows and {len(created)} contacts for this copy, the original grew "
-                       f"by {growth} rows and the club by {grew} participants - find the copy's own by hand before "
+                       + f": it holds {len(added)} rows and {len(created)} contacts for this {noun}, the original grew "
+                       f"by {growth} rows and the club by {grew} participants - find the {noun}'s own by hand before "
                        "removing anything")
         else:
             listing = f"the rows and contacts it added are listed by id in {where}"
-        raise Refused(f"{fid}: its copy {batch['Name']} ({batch_id}) is in Salesforce but not as predicted - "
-                      + "; ".join(wrong) + f". STOPPED. Look at the copy and the original {oid} in Salesforce ("
-                      + listing + f"); then either remove them by hand and `close {fid} --removed`, or "
-                      f"`close {fid} --accepted` (RUNBOOK, Back-fill of attendance into Salesforce)")
+        raise Refused(f"{ident}: its {noun} {batch['Name']} ({batch_id}) is in Salesforce but not as predicted - "
+                      + "; ".join(wrong) + f". STOPPED. Look at the {noun} and the original {oid} in Salesforce ("
+                      + listing + f"); then either remove them by hand and `close {ident} --removed`, or "
+                      f"`close {ident} --accepted` (RUNBOOK, Back-fill of attendance into Salesforce)")
     return closed
 
 
@@ -1128,47 +1240,53 @@ def resend_one(org, entry, club, ledger, paths):
            "participants_before": participants_of(org, acc),
            "original_rows_before": org.count("SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = "
                                              + quoted(entry["original"]["Id"])), "status": "sending"}
-    paths.resend_ledger.append(row, ledger)  # from here on the ledger knows a copy may exist
+    return insert_merging(org, paths.resending, row, resend_body(failed), ledger)
+
+
+def insert_merging(org, kind, row, body, ledger):
+    """Record, insert a resend copy or a merge batch, read it back, record. Raises Refused at the first surprise."""
+    ident, noun = row[kind.ident], kind.noun
+    kind.ledger.append(row, ledger)          # from here on the ledger knows a batch may exist
     status, batch_id = 0, None
     try:
-        status, answer = org.insert("Attendance_Batch__c", resend_body(failed))
+        status, answer = org.insert("Attendance_Batch__c", body)
         batch_id = answer.get("id") if status == 201 and isinstance(answer, dict) else None
         if not batch_id and 400 <= status < 500 and status != 401 and isinstance(answer, list):
             code = known_code(str(answer[0].get("errorCode") or "")) if answer and isinstance(answer[0], dict) else "other"
-            paths.resend_ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome=f"http_{status}_{code}",
-                                            note="Salesforce refused the copy and saved nothing"), ledger)
-            raise Refused(f"{fid}: Salesforce refused the copy (HTTP {status} {code}) and saved nothing; nothing more "
-                          "is sent - decide with Ryan; the next `resend --apply` tries it again")
-        batch_id = batch_id or find_resend_batch(org, fid)
+            kind.ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome=f"http_{status}_{code}",
+                                    note=f"Salesforce refused the {noun} and saved nothing"), ledger)
+            raise Refused(f"{ident}: Salesforce refused the {noun} (HTTP {status} {code}) and saved nothing; nothing "
+                          f"more is sent - decide with Ryan; the next `{kind.command} --apply` tries it again")
+        batch_id = batch_id or find_merging(org, kind, row)
         if not batch_id:
-            raise Refused("no answer and no copy yet")
-        return verify_resend(org, row, batch_id, paths, ledger)
+            raise Refused(f"no answer and no {noun} yet")
+        return verify_merging(org, kind, row, batch_id, ledger)
     except BaseException:
-        if ledger[-1]["failed_id"] == fid and ledger[-1]["status"] == "sending":   # the outcome is not known
-            paths.resend_ledger.append(dict(row, done_utc=stamp(), status="unknown", batch_id=batch_id or "",
-                                            outcome=f"http_{status}", note="the answer or the read-back was lost"),
-                                       ledger)
-            raise Refused(f"{fid}: the copy was sent but Salesforce's answer or the read-back was lost (HTTP {status}) "
-                          "- A COPY MAY BE IN SALESFORCE. Nothing more is sent; run `resend --apply --vpn-off` again: "
-                          "it looks this copy up by its marker before anything else") from None
+        if ledger[-1][kind.ident] == ident and ledger[-1]["status"] == "sending":   # the outcome is not known
+            kind.ledger.append(dict(row, done_utc=stamp(), status="unknown", batch_id=batch_id or "",
+                                    outcome=f"http_{status}", note="the answer or the read-back was lost"), ledger)
+            raise Refused(f"{ident}: the {noun} was sent but Salesforce's answer or the read-back was lost (HTTP "
+                          f"{status}) - A {noun.upper()} MAY BE IN SALESFORCE. Nothing more is sent; run `{kind.command} "
+                          f"--apply --vpn-off` again: it looks this {noun} up by its marker before anything else") from None
         raise
 
 
-def settle_resend(org, row, ledger, paths):
-    """A copy whose outcome was lost ('sending' / 'unknown'): look it up by its marker and finish."""
-    fid = row["failed_id"]
-    batch_id = row["batch_id"] or find_resend_batch(org, fid)
+def settle_merging(org, kind, row, ledger):
+    """A resend copy or a merge batch whose outcome was lost ('sending' / 'unknown'): look it up by its
+    marker - never by club and day - and finish."""
+    ident = row[kind.ident]
+    batch_id = row["batch_id"] or find_merging(org, kind, row)
     if not batch_id:
         ready = datetime.datetime.strptime(row["when_utc"], STAMP) + datetime.timedelta(minutes=SETTLE_AFTER_MINUTES)
         if datetime.datetime.utcnow() < ready:
-            raise Refused(f"{fid}: no copy with its marker yet, but Salesforce may still be working on it - run "
-                          f"resend again after {ready.strftime('%H:%M:%S')} UTC")
-        paths.resend_ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome="not_found",
-                                        note="looked up later: no copy with its marker"), ledger)
-        print(f"  settled {fid}: Salesforce saved nothing; it is a candidate again")
+            raise Refused(f"{ident}: no {kind.noun} with its marker yet, but Salesforce may still be working on it - "
+                          f"run {kind.command} again after {ready.strftime('%H:%M:%S')} UTC")
+        kind.ledger.append(dict(row, done_utc=stamp(), status="not_saved", outcome="not_found",
+                                note=f"looked up later: no {kind.noun} with its marker"), ledger)
+        print(f"  settled {ident}: Salesforce saved nothing; it is a candidate again")
         return
-    closed = verify_resend(org, row, batch_id, paths, ledger)
-    print(f"  settled {fid}: {closed['batch_name']} is in Salesforce and as predicted")
+    closed = verify_merging(org, kind, row, batch_id, ledger)
+    print(f"  settled {ident}: {closed['batch_name']} is in Salesforce and as predicted")
 
 
 def cmd_resend(args, paths, org):
@@ -1182,7 +1300,7 @@ def cmd_resend(args, paths, org):
                       "(RUNBOOK, Back-fill of attendance into Salesforce)")
     if args.apply:
         for row in unsettled:                # before anything else: it needs the ledger only
-            settle_resend(org, row, ledger, paths)
+            settle_merging(org, paths.resending, row, ledger)
     else:
         if stuck:
             print(f"{len(stuck)} copy(ies) marked CHECK in the re-send ledger: `--apply` refuses until each is closed")
@@ -1235,24 +1353,141 @@ def cmd_resend(args, paths, org):
     print(f"re-sent and verified: {len(queue)} batches; ledger {rel(paths.resend_ledger.path)}")
 
 
+# ---- merge ---------------------------------------------------------------------------------------
+# A session of a club and day Salesforce already has (decisions.csv `merge`, on Ryan's word; ticket #244): sent
+# as one batch, which the processor (since 2026-10-24, ticket #108) merges into the day's original - one row for
+# each girl it ticks without a row that day. What it adds is predicted live, by resend's rule, right before each
+# insert, so the age of the fetched submissions does not matter here; it is read back as a resend copy is.
+def merge_body(session):
+    return dict(body_of(session), Creator__c=marker(session, MERGE_CREATOR))
+
+
+def merge_entries(org, sessions):
+    """Each planned merge with its verdict, read live: 'reason' (None: to send), 'original', 'names' (ticked),
+    'adds' and 'new'. A merge's new girls count as made for the later merges of its club (they go in order)."""
+    clubs, entries = {}, []
+    for session in sessions:
+        acc = session["account_id"]
+        if acc not in clubs:
+            clubs[acc] = read_contacts(org, acc)
+        day, body = read_day(org, acc, session["attendance_date"]), merge_body(session)
+        reason, adds = predict(body, day, clubs[acc])
+        entries.append({"session": session, "reason": reason, "original": day["original"],
+                        "names": len(clean_names(body["Contact_IDs__c"])), "adds": len(adds),
+                        "new": sum(1 for _, cid in adds if cid is None)})
+        for position, (name, cid) in enumerate(adds if reason is None else []):
+            if cid is None:
+                clubs[acc].append((f"new {session['key']} {position}", name.casefold()))
+    return entries
+
+
+def merge_one(org, entry, ledger, paths):
+    """Prove again (the club, the day's prediction), record, insert, read back, record. Raises Refused at the
+    first surprise."""
+    session = entry["session"]
+    key, acc, date = session["key"], session["account_id"], session["attendance_date"]
+    check_club(org, session)
+    body, day = merge_body(session), read_day(org, acc, date)
+    reason, adds = predict(body, day, read_contacts(org, acc))
+    new = sum(1 for _, cid in adds if cid is None)
+    if reason or day["original"]["Id"] != entry["original"]["Id"] or (len(adds), new) != (entry["adds"], entry["new"]):
+        raise Refused(f"{key}: its club and day changed since this run read them (now: "
+                      + (f"skipped, {reason}" if reason else f"{len(adds)} girls to add, {new} new contacts")
+                      + ") - nothing sent for it; run merge again, a dry run first")
+    original = day["original"]
+    row = {"when_utc": stamp(), "key": key, "region": session["region"], "account_id": acc,
+           "account_name": session["account_name"], "attendance_date": date,
+           "submissions": "+".join(session["submissions"]), "original_id": original["Id"],
+           "original_name": original["Name"], "names": entry["names"], "adds_expected": len(adds),
+           "contacts_expected": new, "existing_digest": id_digest({cid for _, cid in adds if cid}),
+           "participants_before": participants_of(org, acc),
+           "original_rows_before": org.count("SELECT COUNT() FROM Attendance__c WHERE Attendance_Batch__c = "
+                                             + quoted(original["Id"])), "status": "sending",
+           "note": ("accepted: " + "+".join(session["accepted"])) if session.get("accepted") else ""}
+    return insert_merging(org, paths.merging, row, body, ledger)
+
+
+def cmd_merge(args, paths, org):
+    plan, kind = load_plan(paths), paths.merging
+    merges = plan.get("merges") or []
+    for session in merges:
+        check_entry(session)
+    ledger = kind.ledger.read()
+    last = last_rows(ledger, "key")
+    stuck = sorted(k for k, r in last.items() if r["status"] in OPEN)
+    unsettled = [r for r in last.values() if r["status"] in UNSETTLED]
+    if args.apply and stuck:
+        raise Refused("the merge ledger holds a merge that is in Salesforce but was not right (" + ", ".join(stuck)
+                      + ") - deal with it, then `close <key> --removed` or `close <key> --accepted` (RUNBOOK, "
+                      "Back-fill of attendance into Salesforce)")
+    if args.apply:
+        for row in unsettled:                # before anything else: it needs the ledger only
+            settle_merging(org, kind, row, ledger)
+    else:
+        if stuck:
+            print(f"{len(stuck)} merge(s) marked CHECK in the merge ledger: `--apply` refuses until each is closed")
+        if unsettled:
+            print(f"{len(unsettled)} merge(s) with an unknown outcome: `merge --apply` looks them up first")
+    done = {k for k, r in last_rows(ledger, "key").items() if r["status"] in DONE}
+    todo = [s for s in merges if s["key"] not in done]
+    if args.only:
+        if args.only not in {s["key"] for s in merges}:
+            raise Refused(f"--only {args.only}: not a merge of the plan (decisions.csv 'merge', then plan) - nothing sent")
+        todo = [s for s in todo if s["key"] == args.only]
+        if not todo:
+            raise Refused(f"--only {args.only}: merged already ({last_rows(ledger, 'key')[args.only]['status']}) - "
+                          "nothing sent")
+    entries = merge_entries(org, todo)
+    queue = [e for e in entries if e["reason"] is None]
+    if args.limit is not None:
+        queue = queue[:args.limit]
+    print(f"read live: {len(todo)} planned merges ({sum(1 for s in merges if s['key'] in done)} of the plan merged "
+          "already)")
+    for e in queue:
+        s, o = e["session"], e["original"]
+        print(f"  {s['key']}  {s['account_name']} / {s['attendance_date']} -> {o['Name']} {o['Id']}: {e['names']} "
+              f"names ticked, {e['adds']} girls to add, {e['new']} new contacts")
+    for e in entries:
+        if e["reason"]:
+            s = e["session"]
+            print(f"  {s['key']}  {s['account_name']} / {s['attendance_date']}: skipped, {e['reason']} (stays planned)")
+    print(f"to merge: {len(queue)} batches, {sum(e['adds'] for e in queue)} girls to add, "
+          f"{sum(e['new'] for e in queue)} new contacts, {len({e['session']['account_id'] for e in queue})} clubs")
+    if not args.apply:
+        print("dry run: nothing was sent (--apply writes, with Ryan's go)")
+        return
+    for position, entry in enumerate(queue, 1):
+        row = merge_one(org, entry, ledger, paths)
+        print(f"  {position}/{len(queue)} {row['key']} {row['batch_name']} -> {row['original_name']} {row['account_name']} "
+              f"{row['attendance_date']}: {row['rows_added']} rows added, {row['contacts_created']} new contacts - ok")
+    print(f"merged and verified: {len(queue)} batches; ledger {rel(kind.ledger.path)}")
+
+
 # ---- close, status -------------------------------------------------------------------------------
-def close_resend(args, paths, row):
-    """close for a re-sent copy (the key is the failed batch's id): CHECK accepted, or removed by hand."""
+def close_merging(args, kind, row):
+    """close for a resend copy (its key: the failed batch's id) or a merge (its session key): CHECK accepted,
+    or removed by hand. A merge removed is not merged any more: `merge --apply` predicts and sends it again."""
+    noun = kind.noun
     if args.accepted and row["status"] != "CHECK":
-        raise Refused(f"--accepted is for a copy the re-send ledger marks CHECK; {args.key} is '{row['status']}'")
+        raise Refused(f"--accepted is for a {noun} its ledger marks CHECK; {args.key} is '{row['status']}'")
     if args.removed and (row["status"] not in DONE | OPEN | UNSETTLED or not row["batch_id"]):
-        raise Refused(f"--removed is for a copy that was in Salesforce; {args.key} is '{row['status']}'")
+        raise Refused(f"--removed is for a {noun} that was in Salesforce; {args.key} is '{row['status']}'")
     closed = dict(row, done_utc=stamp(), status="accepted" if args.accepted else "removed",
                   note=("accepted as it is by Ryan" if args.accepted else "removed from Salesforce by hand")
                   + (f": {args.note}" if args.note else ""))
-    paths.resend_ledger.append(closed)
-    print(f"{args.key}: its copy recorded as {closed['status']} ({row['batch_name']}); it is never re-sent again")
+    kind.ledger.append(closed)
+    then = (f"the next `{kind.command} --apply` predicts it live and sends it again" if args.removed and kind.removed_again
+            else "it is never sent again")
+    print(f"{args.key}: its {noun} recorded as {closed['status']} ({row['batch_name']}); {then}")
 
 
 def cmd_close(args, paths):
+    merged = last_rows(paths.merge_ledger.read(), "key")
+    if args.key in merged:   # first: a session of ledger.csv that is sent or open is never planned as a merge
+        return close_merging(args, paths.merging, merged[args.key])
     row = last_rows(paths.ledger.read(), "key").get(args.key)
     if row is None and args.key in last_rows(paths.resend_ledger.read(), "failed_id"):
-        return close_resend(args, paths, last_rows(paths.resend_ledger.read(), "failed_id")[args.key])
+        return close_merging(args, paths.resending, last_rows(paths.resend_ledger.read(), "failed_id")[args.key])
     if row is None:
         raise Refused(f"the ledger has no session {args.key}")
     if args.accepted and row["status"] != "CHECK":
@@ -1281,19 +1516,42 @@ def cmd_status(args, paths):
               f"and the {sum(int(r['contacts_created'] or 0) for r in good)} participant contacts they created "
               f"({rel(paths.contacts)}) - only with Ryan's go")
     resent = last_rows(paths.resend_ledger.read(), "failed_id")
-    if not resent:
-        return
-    good = [r for r in resent.values() if r["status"] in DONE]
-    rows, made = sum(int(r["rows_added"] or 0) for r in good), sum(int(r["contacts_created"] or 0) for r in good)
-    print(f"re-send ledger: {len(good)} corrections re-sent and verified, {rows} attendance rows added to their "
-          f"originals, {made} new girls, {len({r['account_id'] for r in good})} clubs")
-    for row in resent.values():
-        if row["status"] not in DONE:
-            print(f"  {row['status']} {row['failed_id']} {row['batch_name'] or '(no copy)'} {row['outcome']} {row['note']}")
-    if good:
-        print(f"rollback of the re-sends would remove, by id ({rel(paths.resend_added.path)}): the {rows} attendance "
-              f"rows and the {made} contacts they added, then the {len(good)} copies, and set each original's "
-              "Girls_Present__c back to its own rows - only with Ryan's go")
+    if resent:
+        good = [r for r in resent.values() if r["status"] in DONE]
+        rows, made = sum(int(r["rows_added"] or 0) for r in good), sum(int(r["contacts_created"] or 0) for r in good)
+        print(f"re-send ledger: {len(good)} corrections re-sent and verified, {rows} attendance rows added to their "
+              f"originals, {made} new girls, {len({r['account_id'] for r in good})} clubs")
+        for row in resent.values():
+            if row["status"] not in DONE:
+                print(f"  {row['status']} {row['failed_id']} {row['batch_name'] or '(no copy)'} {row['outcome']} {row['note']}")
+        if good:
+            print(f"rollback of the re-sends would remove, by id ({rel(paths.resend_added.path)}): the {rows} attendance "
+                  f"rows and the {made} contacts they added, then the {len(good)} copies, and set each original's "
+                  "Girls_Present__c back to its own rows - only with Ryan's go")
+    merged = last_rows(paths.merge_ledger.read(), "key")
+    if merged:
+        good, states = [r for r in merged.values() if r["status"] in DONE], {}
+        for row in merged.values():
+            states[row["status"]] = states.get(row["status"], 0) + 1
+        print(f"merge ledger: {len(good)} merges verified, {sum(int(r['rows_added'] or 0) for r in good)} attendance "
+              f"rows added to their originals, {sum(int(r['contacts_created'] or 0) for r in good)} new girls, "
+              f"{len({r['account_id'] for r in good})} clubs (by state: "
+              + ", ".join(f"{state} {n}" for state, n in sorted(states.items())) + ")")
+        for row in merged.values():
+            if row["status"] not in DONE:
+                print(f"  {row['status']} {row['key']} {row['batch_name'] or '(no batch)'} {row['outcome']} {row['note']}")
+        # what a rollback removes: every merge batch that is (or may be) in Salesforce, and what merge_added.csv
+        # lists for it - a CHECK's and a settled one's too; a batch closed --removed is gone already
+        live = {r["batch_id"] for r in merged.values() if r["batch_id"] and r["status"] in DONE | OPEN | UNSETTLED}
+        listed = [a for a in paths.merge_added.read() if a["batch_id"] in live]
+        unsure = sum(1 for a in listed if a["uncertain"] == "yes")
+        if live:
+            print(f"rollback of the merges would remove, by id ({rel(paths.merge_added.path)}): the "
+                  f"{sum(1 for a in listed if a['kind'] == 'attendance')} attendance rows and the "
+                  f"{sum(1 for a in listed if a['kind'] == 'contact')} contacts they added"
+                  + (f" ({unsure} of them uncertain: checked by hand first)" if unsure else "")
+                  + f", then the {len(live)} merge batches (batch_id in {rel(paths.merge_ledger.path)}), and set each "
+                  "original's Girls_Present__c back to its own rows - only with Ryan's go")
 
 
 def main(argv=None, org=None):
@@ -1318,10 +1576,15 @@ def main(argv=None, org=None):
     resend.add_argument("--only", help="re-send only this Failed batch (its id)")
     resend.add_argument("--since", type=datetime.date.fromisoformat, default=RESEND_SINCE,
                         help=f"the Failed batches created on or after this day (default {RESEND_SINCE})")
-    for live in (snap, send, resend):
+    merge = sub.add_parser("merge", allow_abbrev=False)
+    merge.add_argument("--apply", action="store_true", help="write to Salesforce (needs Ryan's go)")
+    merge.add_argument("--limit", type=positive, help="merge only the first N the day would take")
+    merge.add_argument("--only", help="merge only this session key")
+    for live in (snap, send, resend, merge):
         add_vpn_flag(live)
     close = sub.add_parser("close", allow_abbrev=False)
-    close.add_argument("key", help="a session key of ledger.csv, or a failed batch id of resend_ledger.csv")
+    close.add_argument("key", help="a session key of ledger.csv or merge_ledger.csv, or a failed batch id of "
+                                   "resend_ledger.csv")
     how = close.add_mutually_exclusive_group(required=True)
     how.add_argument("--removed", action="store_true", help="the batch, its rows and its contacts were removed by hand")
     how.add_argument("--accepted", action="store_true", help="the batch the ledger marks CHECK is right as it is")
@@ -1338,10 +1601,10 @@ def main(argv=None, org=None):
         elif args.cmd == "close":
             cmd_close(args, paths)
         else:
-            if args.cmd in ("snapshot", "resend") or args.apply:
+            if args.cmd in ("snapshot", "resend", "merge") or args.apply:
                 require_vpn_off(args)
             org = org or Org(args.org)
-            {"snapshot": cmd_snapshot, "send": cmd_send, "resend": cmd_resend}[args.cmd](args, paths, org)
+            {"snapshot": cmd_snapshot, "send": cmd_send, "resend": cmd_resend, "merge": cmd_merge}[args.cmd](args, paths, org)
     except Refused as stop:
         sys.exit(str(stop))
     except (KeyError, IndexError, ValueError, TypeError, AttributeError, UnicodeError, OSError, csv.Error) as err:
