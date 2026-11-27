@@ -14,7 +14,7 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
   2. Updates the roster options of existing club questions when the sheet
      changed (new girls enrolled, corrections), and the required flag where
      a roster lacks it.
-  3. Regenerates ALL conditional logic from scratch, in four categories:
+  3. Regenerates ALL conditional logic from scratch, in five categories:
        A. ROSTER VISIBILITY  - clubName == "<club>" -> show that roster.
                                With the Club picker, a club whose name another
                                partner's club shares is its own entry,
@@ -36,6 +36,10 @@ This script reads a CSV export of that sheet and makes the Jotform form match:
        D. ONE CLUB           - only on a form with the club guard (added
                                once with --club-guard): several clubs picked
                                -> show the warning, hide + disable Submit
+       E. PARTNER FILL       - only on a form with the fill (added once with
+                               --partner-fill; afterwards its own rules keep
+                               it on): one calculation per partner, its clubs'
+                               picker entries -> its name into question 331
   4. Keeps each module dropdown's calcValues equal to its own options
      (glow/sync.py MODULE_CALC_VALUES), so question 98 (module_id) copies the
      module itself, never the text a browser's page translation shows; and
@@ -250,7 +254,8 @@ def mk_calc_rule(terms, result_field, operands, equation, ignore_hidden=False,
             "priority": "0", "index": "0", "terms": terms, "action": [action]}
 
 def build_conditions(club_questions, partner_of, module_options, picker=None,
-                     picker_options=None, guard=None, submit=None, retired=()):
+                     picker_options=None, guard=None, submit=None, retired=(),
+                     partner_fill=None):
     """club_questions: {qid: the text its rule tests} - the club's name, or on
     a form with the Club picker its picker entry, which for a club whose name
     another partner's club shares is "<club> - <partner>" (main() decides;
@@ -264,7 +269,9 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
     D; both, with a picker and its options, or no guard rules at all);
     retired: qids of the retired rosters (docs/plans/2026-10-06-clubs-off-
     jotform.md) - in question 18's operands and equation like every roster,
-    but with no show rule (a roster nobody can see has no tick to add).
+    but with no show rule (a roster nobody can see has no tick to add);
+    partner_fill: {qid: its club's partner} on a form with the Partner fill
+    (section E, docs/plans/2026-11-23-partner-fill.md), else None.
 
     On a form with the picker the Contact_IDs sum (section C) is rule 0, built
     before every other rule so its ids are the lowest, and lists the picker
@@ -374,6 +381,29 @@ def build_conditions(club_questions, partner_of, module_options, picker=None,
         if GUARD_DISABLES_SUBMIT:
             conds.append(mk_require_rule(terms(), [mk_disable(submit)], link="All"))
 
+    # E. the Partner fill (the photo folders' {Partner}, #236): one calculation per
+    # partner - its clubs' picker entries -> its name as text into PARTNER. The
+    # partner is the data's (main(): the Roster's, else the form's rules'), never
+    # split out of an entry. No fill for a retired roster (not in club_questions),
+    # one the typed box still tells apart (its entry cannot say whose it is) or one
+    # whose partner nobody knows. Appended last and minted last, so every rule
+    # above keeps its index and its ids
+    if picker and partner_fill:
+        entries = defaultdict(set)
+        for qid, partner in partner_fill.items():
+            if qid in club_questions and qid not in partner_of and (partner or "").strip():
+                entries[partner].add(club(club_questions[qid]))
+        for partner in sorted(entries, key=lambda p: (p.lower(), p)):
+            if re.search(r"[{}\[\]]", partner):
+                # a calculation reads "{...}" as a field; any one of the four, alone, keeps
+                # the partner out (#236): an equation that is not plain text is never written
+                warn(f"  ! partner '{partner}': its name holds '{{', '}}', '[' or ']', which a "
+                     f"calculation would misread - q{PARTNER} (Partner) stays blank for its "
+                     f"{len(entries[partner])} club(s) (docs/plans/2026-11-23-partner-fill.md)")
+                continue
+            terms = [mk_term(picker, "equals", e) for e in sorted(entries[partner], key=lambda e: (e.lower(), e))]
+            conds.append(mk_calc_rule(terms, PARTNER, picker, partner, as_text=True))
+
     for i, c in enumerate(conds):
         c["index"] = str(i)
         c["priority"] = str(i)
@@ -470,6 +500,11 @@ def main():
                          "question 5 (a renamed club, a respelled partner) - rename its "
                          "Salesforce account first. Not needed for --same-name-switch's own "
                          "changes")
+    ap.add_argument("--partner-fill", action="store_true",
+                    help="by hand, once per form with the Club picker: question 331 (Partner, "
+                         "hidden) is filled with the picked club's partner - one calculation per "
+                         "partner, for the photo folders' names and the staff e-mail. Afterwards "
+                         "the form's own rules keep it on; the automatic sync never passes this")
     args = ap.parse_args()
     if args.region and not args.roster:
         sys.exit("--region needs --roster (the Roster tab is what carries regions)")
@@ -600,6 +635,10 @@ def main():
         sys.exit("--same-name-switch needs the Club picker on the form (a mentor cannot be asked "
                  "to type '<club> - <partner>'): add it first (--club-picker), then run "
                  "--same-name-switch separately")
+    if args.partner_fill and picker_qid is None:
+        sys.exit(f"--partner-fill needs the Club picker on the form (q{PARTNER} is filled from the "
+                 "club picked; without it mentors type the partner): add it first (--club-picker), "
+                 "then run --partner-fill separately")
 
     # the one-club guard: refusals before any write
     guards = club_guards(questions)
@@ -697,6 +736,13 @@ def main():
         """The partner the form's own rules name for this roster ("" when they
         name none - an owner read from the Roster's rows is not the form's word)."""
         return "" if qid in inferred else current_partner_of.get(qid, "")
+
+    # the Partner fill (build_conditions section E): turned on by hand with
+    # --partner-fill, and kept on by the form's own rules - a calculation into
+    # question 331 - so the runner, which never passes the flag, keeps it too
+    fill_on = picker_qid is not None and (args.partner_fill or any(
+        str(a.get("resultField")) == PARTNER
+        for c in props.get("conditions", []) for a in (rule_parts(c) or ((), ()))[1]))
 
     # question 18 the old way (glow/sync.py CONTACT_IDS_FIRST / _PICKER_OPERAND):
     # the rewrite below fixes it; the runner matches this line (tools/auto_sync.py
@@ -1198,6 +1244,20 @@ def main():
                  "existing club(s) (the '!' lines above) - nothing written. Rename each "
                  "Salesforce account first, then run again with --q5-change-ok")
 
+    # the Partner fill writes question 331, which a rule that still shows it asks the
+    # mentor to type (rosters told apart by the typed box): never both on one form
+    if fill_on and partner_of:
+        if args.partner_fill:
+            sys.exit(f"--partner-fill: {len(partner_of)} rosters on this form share a Club picker "
+                     f"entry and are told apart by the typed Partner box (q{PARTNER}), which the "
+                     "fill would write over - run --same-name-switch first (each gets its own "
+                     "entry), or in the same run")
+        warn(f"  ! the form's rules fill q{PARTNER} (Partner) from the Club picker, but "
+             f"{len(partner_of)} rosters are told apart by the typed Partner box (q{PARTNER}): no "
+             "fill rules this run - run --same-name-switch (docs/RUNBOOK.md, \"Club names two "
+             "partners share\")")
+        fill_on = False
+
     # --- where new rosters go: above the links and Submit (glow/layout.py) -
     # computed before the first write: two Submit buttons are a refusal
     slot = None
@@ -1369,15 +1429,23 @@ def main():
     # The API stores each condition's terms/action as JSON-encoded STRINGS
     # (that is what GET returns and what the builder saves) - encode them.
     # each roster's rule tests its own text (option_of); partner_of holds only the
-    # rosters that still share one text and are told apart by the typed Partner box
+    # rosters that still share one text and are told apart by the typed Partner box.
+    # The fill's partners are the data's, as sf_names below (a new club's included)
+    fill = ({q: pair_of[q][0] if q in pair_of else rule_partner(q) for q in option_of}
+            if fill_on else None)
     conds = build_conditions(option_of, partner_of, module_options,
                              picker=picker_qid or ("NEW" if args.club_picker else None),
                              picker_options=picker_list, guard=guard_field,
-                             submit=submit_qid if guard_field else None, retired=retired)
+                             submit=submit_qid if guard_field else None, retired=retired,
+                             partner_fill=fill)
+    if fill_on:
+        fills = sum(1 for c in conds if any(str(a.get("resultField")) == PARTNER for a in c["action"]))
+        print(f"Partner fill: q{PARTNER} (Partner) is filled from the Club picker - {fills} rule(s), "
+              "one per partner")
     # The typed Partner box has nothing left to do on a picker form once no rule
     # shows it (every same-name club has its own entry, or the form has none):
     # unhidden, every mentor sees an optional "Partner" box. Hidden, it is still
-    # submitted, blank - the staff notification e-mail's Partner row goes empty.
+    # submitted - blank, or the picked club's partner on a form with the fill (E).
     hide_box = (has_picker and PARTNER in questions
                 and questions[PARTNER].get("hidden") != "Yes"
                 and not any(a.get("visibility") == "Show" and str(a.get("field")) == PARTNER

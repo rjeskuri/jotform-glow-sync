@@ -148,7 +148,9 @@ The rollback (RUNBOOK and plan) is by deploy only, each part with its own guard,
 copies are the record.
 The plan `docs/plans/2026-11-05-sf-us-partners.md` orders before/, the copies, item 11's metadata copy, the check-only,
 Ryan's go, the deploy, `after/`, the refresh and the SOQL figures; its Result carries the ids and the before -> after
-figures. A dated DECISIONS entry names #209 (Why, Rejected: a marker field, Consequences).
+figures. A dated DECISIONS entry names #209 (Why, Rejected: a marker field, Consequences). Since #267 (2026-11-25) six
+totals reports OR the D1-D5 filter with a Period item: the list item or paragraph of the rule says so
+(test/sf_us_monthly_totals_test.py holds #267's class).
 """
 import glob
 import os
@@ -1736,6 +1738,9 @@ class ReportingDashboardDocs(unittest.TestCase):
         # since #200 (GLOW's review, Ryan 2026-11-02) its own retrieve, `data/sf_glow_review_<month>/<topic>/`
         # (GlowReviewReportingDocs checks that #200's rollback names no other change's folder)
         if re.match(r"data/sf_glow_review_(\d{4}-\d\d|<month>)(?![\w-])", p):
+            return False
+        # since #119 (on-time Monthly Reports) its own retrieve, `data/sf_on_time_<date>/`, in #119's rollback
+        if re.match(r"data/sf_on_time_(\d{4}-\d\d(-\d\d)?|<date>|<month>)(?![\w-])", p):
             return False
         if re.match(r"(tools|docs|plans|scripts|glow|test)/", p) or re.search(r"\.(py|md|sh|csv)$", p):
             return p.startswith(("data/", "backups/"))
@@ -8064,12 +8069,15 @@ class GlowReviewReportingDocs(unittest.TestCase):
     # --- #200's rollback, in the plan and in the RUNBOOK (review of #200) -------------------------------------
 
     def runbook_rollback(self):
-        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end."""
+        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end,
+        or to the next change's rollback (since #119, "Rollback of #119" follows it)."""
         part = self.r.part()
         m = re.search(r"(?im)^\W*rollback\b[^\n]*#200\b", part)
         self.assertTrue(m, f"RUNBOOK section {ReportingDashboardDocs.PART[4:]!r}: no rollback of #200 (a paragraph "
                            "starting `Rollback of #200`)")
-        return part[m.start():]
+        rest = part[m.start():]
+        nxt = re.search(r"(?im)^\W*rollback\s+of\s+#(?!200\b)\d+", rest[1:])
+        return rest[:nxt.start() + 1] if nxt else rest
 
     def assertRollbackOf200(self, raw, where):
         """#200's rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's
@@ -8766,11 +8774,25 @@ class UsPartnersOffReportsDocs(unittest.TestCase):
         cl_m, cl_a = self.cl(monthly), self.cl(attendance)
 
         # the Monthly reports: each report on D1-D5 and item 19 filters `DHIS2__c$Account__c notEqual` the six
-        rule = [s for s in cl_m if "DHIS2__c$Account__c" in s and self.stated(s, self.NOT_EQUAL) and self.D_ALL.search(s)
-                and self.ITEM_19.search(s) and self.EVERY_REPORT.search(s) and self.us_ref(s)]
+        def is_rule(s):
+            return ("DHIS2__c$Account__c" in s and self.stated(s, self.NOT_EQUAL) and self.D_ALL.search(s)
+                    and self.ITEM_19.search(s) and self.EVERY_REPORT.search(s) and self.us_ref(s))
+        rule = [s for s in cl_m if is_rule(s)]
         self.assertTrue(rule, f"{m_where}: say each Monthly report on D1-D5 and item 19 (the stories table) filters "
                               "`DHIS2__c$Account__c notEqual` the six U.S partners, in one sentence naming every report, "
                               "D1-D5, item 19 and the six (not negated, not history)")
+        # #267 (Ryan, 2026-11-25) changed what that filter does in six totals reports: there the item is ORed through
+        # `booleanFilter` with a locked `DHIS2__c$Period__c lessThan 11/1/2026`, so the U.S Monthly Reports before
+        # 2026-11-01 count on them again. The item is still in every report, but the rule read alone now says the U.S
+        # is out of every total: the list item or paragraph that states it also states #267's exception (#267 and the
+        # `booleanFilter` or the Period item; UsMonthlyTotalsDocs in test/sf_us_monthly_totals_test.py pins the rest).
+        self.assertTrue([b for b in self.r.blocks(monthly) if any(is_rule(s) for s in self.cl(b))
+                         and re.search(r"(?<![\w#])#267\b", b)
+                         and re.search(r"\bbooleanFilter\b|DHIS2__c[$.]Period__c|(?i:\bPeriod\s+(criteria\s+)?item\b)", b)],
+                        f"{m_where}: since #267 six totals reports OR this `DHIS2__c$Account__c notEqual` item with a "
+                        "locked `DHIS2__c$Period__c lessThan 11/1/2026` (`booleanFilter`), so the U.S Monthly Reports "
+                        "before 2026-11-01 count there: say so (#267, and the `booleanFilter` or the Period item) in the "
+                        "list item or paragraph that says every Monthly report filters `notEqual` the six")
         # ... and that filter holds the six alone: the three monthly partners' Monthly Reports stay on D1-D5
         for s in cl_m:
             if "DHIS2__c$Account__c" not in s or not self.NOT_EQUAL.search(s):

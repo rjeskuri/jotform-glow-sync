@@ -872,6 +872,14 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - A true count of new mentors needs a new question on the Monthly Report form ("How many new mentors did you recruit last month?"), outside #80; it would count from the day it is added.
   - `glow/sf_keep_list.csv` item 12 reads `new` until the deploy, then takes the report's id, and its `label_today` and `label_target` become "Partners that recruited new mentors".
 
+### 2026-10-26 — The dashboard's timing: an average-delay metric, and the delay report from 1 September 2026 (#103)
+
+- The Jotform Attendance dashboard shows, from #102's reports, the clubs not submitting last week (a metric and a table by partner, `Clubs_Not_Submitting_Last_Week`), the average days from session to submission of last month (a metric, the average of `Submission_Delay_Days__c` in `Late_Submissions_Last_Month`, which gains an Average summary for it) and the average delay by partner and session month (a bar chart, `Submission_Delay_by_Partner_by_Month`).
+- `Submission_Delay_by_Partner_by_Month` keeps only session dates from 2026-09-01, like the other attendance reports, deployed with the dashboard.
+- **Why:** Ryan, 2026-10-26, on the ticket: the outline's metric of late submissions "over N days" assumed a threshold that DECISIONS 2026-10-23 dropped, so it becomes the average, and a click opens every delay, largest first; the floor drops the February-March 2026 pilot batches, which showed as a blank-partner bar with delays of months. A dashboard component cannot narrow the report to last month, so the chart shows a bar per session month.
+- **Rejected:** a count of every submission of last month (it says nothing about timing); a threshold of any kind (2026-10-23).
+- **Consequences:** if the check-only refuses 22 components, the four go on a new dashboard "Attendance Submissions" in the Attendance folder, named from the Jotform Attendance box (the check-only decides, Ryan 2026-10-26). The rollback of #103 redeploys only the dashboard; the two report edits stay. Plan: `docs/plans/2026-10-23-submission-timing.md`, "Task #103".
+
 ### 2026-10-30 — Photos on the Shared Drive go to its trash 90 days after they arrive
 
 - **The photo mover (`drive-sync/`) moves photos on the company Shared Drive to that drive's trash once they have been there 90 days.** GLOW's CEO approved it on 2026-10-30 (per Ryan). It is trash only: the mover never deletes anything for good and never empties the trash. A Content manager (Ryan's role) can restore an item from the Shared Drive's trash for 30 days; after that Google deletes it ([plan](plans/2026-10-30-photo-retention.md), Context).
@@ -937,6 +945,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The filters match the partner accounts by name, so a renamed U.S account drops out of the filters and comes back silently on every dashboard and list, until the filter values are renamed with it.
   - A newly inactive partner, or another partner that stops reporting through Jotform, is a new ticket: a fresh retrieve, the filter values edited, check-only, Ryan's go, deploy.
   - The U.S partners stay in `glow/sf_partners.csv` and in Salesforce; only the reports and the dashboard filter leave them out.
+- 2026-11-25: amended by #267 (the 2026-11-25 entry below): six totals reports on D1, D3 and D4 count the U.S Monthly Reports through October 2026 again; every other Monthly report, item 19, the three not-submitted lists and the Partner filter keep this exclusion.
 
 ### 2026-10-26 — Backed-up live writes go through without a prompt
 
@@ -988,3 +997,49 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Until Ryan pushes the script and runs `installTriggers` once, the menu is still the only way. After that the window is up to an hour, during which the Club Roster Form can still offer a retired club; the menu closes it at once.
   - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
   - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".
+
+### 2026-11-19 — The attendance processor is ours to deploy; another team's release restored over (#238)
+
+- Cyntexa's release of 2026-10-26 (`0AfRP000002i8aD0AQ`) replaced `AttendanceBatchProcessor` and its two test classes with their pre-October copy, wrapped in their error logging. On Ryan's go (2026-11-19) our last live version (2026-10-24) was deployed back (`0AfRP000002kdV30AI`). Their logging was not kept, and two methods of their `AttendanceBatchProcessorTest` were adapted so that no test fails in production.
+- **Why:** their copy dropped four fixes (one insert per batch, `Girls_Present__c`, name cleaning, merging a mentor's correction). For three and a half weeks corrections failed as Duplicates and November's batches had no count. Their `try/catch` returned null where our code rethrows, so a failure inside a step could leave a batch marked Success with missing rows.
+- **Rejected:** merging their logging into our version (the catch-and-return-null pattern hides exactly the failures the processor reports as Failed batches); a renamed processor of our own (it protects only while their release leaves the trigger out; kept as the next step if the overwrite happens again).
+- **Consequences:**
+  - Ryan asks Cyntexa to leave the three Attendance classes and the trigger out of their releases, or to retrieve from production first.
+  - A follow-up ticket proposes a runner check that the live processor still matches ours, so an overwrite shows within a day instead of weeks.
+  - Their test class now holds our two adapted methods. Whether their next release would fail its own tests against our processor depends on which test classes it carries and runs (not checked), so the runner check above is the guard, not their tests.
+
+### 2026-11-20 — A Monthly Report is on time when filed by the 15th of the month after (#119)
+
+- **The rule:** a Monthly Report (`DHIS2__c`) is on time when its `Monthly_Report_submission_date__c` is on or before the 15th of the month after its `Period__c` (December's report: by 15 January of the next year).
+- The rule is Ryan's and GLOW's decision of 2026-11-02 (the hold on #119 lifted the same day): GLOW's review asked for a summary chart of the partners who submitted on time versus not, by month, beside item 18's partner-level list.
+- **The field:** `DHIS2__c.Submitted_On_Time__c` ("Submitted On Time"), a text formula that reads "On time" or "Late" by the rule; the report "On Time by Month" and item 18 ("Reports completed on time") read it, and D5 shows the report as a stacked column (RUNBOOK "GLOW Club Reporting"). Ticket #119, [plan](plans/2026-11-20-sf-on-time.md).
+- **A blank date:** a Monthly Report with a blank `Monthly_Report_submission_date__c` or a blank `Period__c` gets no value: `Submitted_On_Time__c` is blank too, neither "On time" nor "Late" (a Ruling of the build, not GLOW's). The submission date is the record's creation date and is never blank; 6 of the 1,097 Monthly Reports have no `Period__c` (2026-11-20), none of them in the reporting year, so no chart counts them.
+- **The date compared:** `Monthly_Report_submission_date__c` is a date formula on `CreatedDate`, the creation's date in GMT: a report filed on the evening of the 15th in the Americas can already be the 16th in GMT, and Late.
+- **Why:** the 15th is when GLOW expects the reports (they come in between the 5th and about the 15th of the next month, plan of #195); a field rather than a report formula, so one value serves the chart, item 18's column and any later report.
+- **Rejected:** a report-level formula (one per report, and a summary formula cannot group a stacked column); a rule in the partner's own time zone (the record has none).
+- **Consequences:**
+  - A report filed on the evening of the 15th in the Americas can read Late (the GMT date).
+  - The 6 Monthly Reports with no `Period__c` (none in the reporting year) have no value and are in neither bar of the chart.
+
+### 2026-11-23 — The photo folders already on the Shared Drive are re-filed once, from a club → partner list (#237)
+
+- The club folders the mover filed directly in the region folders before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/` by `drive-sync/Refile.gs` (`previewRefile`, then `refileExisting`), each folder moved whole, keeping its name and photos.
+- **Partner source, option A** (Ryan, 2026-11-23, ticket #237): a repo tool, `tools/refile_list.py`, reads the sheet's Roster and Partners exports once and produces the club → partner list (`RefileList.gs`, `REFILE_LIST`); the mover uses that list for this one-time re-filing only, and both files are deleted from the live project afterwards. The mover does not read the sheet, and no new OAuth scope is added to the mover project.
+- **Folders with no date** (made before 2026-10-30, named by club only) go to `<Region>/<Partner>/undated/` (Ryan, the same day).
+- **A club whose partner is not found stays where it is** and is listed in the dry run with the reason; so does every folder the plan cannot place unambiguously (two partners for its club, a date that is not a real one, two folders of one name, two partner or month folders of one name, a folder of its name already in the month folder).
+- **Why:** staff asked for the existing club folders to be grouped like the new ones (#225); their names carry no partner, and the mover does not read the sheet.
+- **Consequences:**
+  - The existing folders keep their names: no renaming of old folders or files, and no follow-up ticket for it (Ryan, 2026-11-23).
+  - Ryan reviews `previewRefile`'s log before the real run; what stays is moved by hand or left.
+  - Plan: `docs/plans/2026-11-23-refile-photo-folders.md` (Rollout, Rollback, Result).
+
+### 2026-11-25 — The six totals reports count the U.S partners' Monthly Reports through October 2026 (#267)
+
+- Since #267 six totals reports on D1, D3 and D4 count the six U.S partners' Monthly Reports with `Period__c` before 2026-11-01 (through October 2026) again: Overall Attendance by Month, Participation by Month and Partner (item 3), GLOW Club Each Week (item 4), Club Observations by Month and Partner (item 10), Number of mentors trained about module (item 13) and Number of training sessions led (item 14). In each, #209's locked `DHIS2__c$Account__c notEqual` item is ORed through `booleanFilter` with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` (deploy `0AfRP000002l1XN0AY`, 2026-11-25, on Ryan's go "go with sums"; [plan](plans/2026-11-25-sf-us-monthly-totals.md); RUNBOOK "Monthly Report dashboards in Salesforce").
+- This amends 2026-11-05 (#209) for those six reports only. The reports of who reported, what is approved, on time, and which clubs or modules, and the stories table (item 19), keep the full #209 exclusion, and so do the three not-submitted lists and the Jotform Attendance dashboard's Partner filter.
+- **Why:** Ryan, 2026-11-24/25: the monthly dashboards (D1-D5) should line up with the interactive dashboard, which has no filters. The gap between them, January-October 2026, was exactly the six U.S partners' `Monthly_Total__c` (639), and Ryan took both recommendations: a cutoff through October 2026, and only the totals and trends reports changed.
+- **Rejected:** counting the U.S on every Monthly report, item 19 and the approval and on-time reports too: those track who reported and what is approved, where #209's reason (inactive partners distorting the figures) still holds; counting the U.S Monthly Reports with no cutoff (every month, November 2026 on): the U.S form was disabled on 2026-10-06, so the U.S partners have no active months after October.
+- **Consequences:**
+  - A U.S Monthly Report for November 2026 or later stays out of every report, the six totals reports too.
+  - The kept reports keep the #209 exclusion in every month, so for January-October 2026 a totals report and a who-reported or approval report on the same dashboard count different partners.
+  - The six reports' filters still match the U.S partners by name (2026-11-05); a change to them is a new ticket from a fresh retrieve.
