@@ -1,7 +1,8 @@
 ---
 title: The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event
 author: Claude (ticket #244, on Ryan's go of 2026-11-19)
-status: in-progress      # ticket #244; tool support built and AusCam Club 3 merged live 2026-11-20; San Pedro waits on Ryan
+status: done      # ticket #244; tool support built, AusCam Club 3 merged live 2026-11-20, San Pedro sent 2026-11-27
+done: 2026-11-27
 created: 2026-11-20
 intent: ticket #244 - left over from #238's November back-fill; Ryan 2026-11-19 - "build the tool support and do AusCam Club 3 first"
 ---
@@ -98,9 +99,25 @@ that folder lives only in #238's worktree.
   `Girls_Present__c` empty, no rows of its own.
 - **Step 5:** `sf_girls_present.py check --vpn-off`: 1,855 Jotform Success batches, differ 0, without a
   value 0 -> OK.
-- **Not done: step 6, San Pedro Sacatepequez 2026-10-17.** Its line stays `skip` until Ryan confirms
-  the report's own module (`Special Event - IDG Celebrations`, blank week) with the partner; step 6 is
-  ready as written.
+- **Step 6, San Pedro Sacatepequez 2026-10-17: sent 2026-11-27 07:23 UTC** (Ryan's go of 2026-11-27:
+  the report's own module, `Special Event - IDG Celebrations` with a blank week, and the
+  `club_has_earlier_contacts` risk accepted). Its line became `accept club_has_earlier_contacts`
+  (the folder's earlier files kept as `before244b_*`); the resolver ran again from 2026-11-13 01:00:00
+  US Eastern (Ryan, 06:58:58Z; 436 submissions, balanced; the session's row unchanged: 1 submission,
+  11 girls, no flags).
+  - The first `snapshot` failed (HTTP 400): the attendance aggregate had passed 2,000 club-days
+    (`EXCEEDED_ID_LIMIT`; 1,851 on 2026-11-20), and an aggregate query cannot page. Fixed on this
+    branch, tests first: the snapshot reads it a calendar month at a time (plus the blank dates) and
+    refuses any aggregate answer of 2,000 groups. Then: 479 accounts, 2,282 batches, 2,088 club days,
+    272 clubs with participants; `plan`: 1 to send, 245 already in Salesforce, 1 held (another club).
+  - `send` predicted up to 11 new girls (the tool holds counts, not names); a counts-only check of the
+    11 ticked names against the club's Contacts found 11 single exact matches, 0 none.
+  - `send --apply --vpn-off --limit 1`: BATCH-002299, Success, 11 rows, `Girls_Present__c` 11,
+    `Module_Week__c` blank, 0 new girls (the club's participants stay 15).
+  - `sf_girls_present.py check --vpn-off`: 2,093 Jotform Success batches, differ 0, without a value 0
+    -> OK.
+- **Rollback of San Pedro's batch** (only with Ryan's go): delete its 11 rows, then BATCH-002299;
+  `close '001RP00000yEn04YAC|2026-10-17' --removed`. No contact to remove.
 - **Rollback of the merge** (only with Ryan's go): delete the 8 rows listed in `merge_added.csv`, then
   BATCH-002047, then set BATCH-000498's `Girls_Present__c` back to 18;
   `close '001RP00000yElpvYAC|2026-10-03' --removed`. No contact to remove (the merge made none).

@@ -13,7 +13,7 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
-| 2026-11-20 | The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event | in-progress |  | [2026-11-20-backfill-two-club-days.md](2026-11-20-backfill-two-club-days.md) |
+| 2026-11-20 | The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event | done 2026-11-27 |  | [2026-11-20-backfill-two-club-days.md](2026-11-20-backfill-two-club-days.md) |
 | 2026-11-19 | The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger | accepted |  | [2026-11-19-hourly-club-roster-refresh.md](2026-11-19-hourly-club-roster-refresh.md) |
 | 2026-11-18 | A Region filter on the Jotform Attendance dashboard, through Account.Partner_Region__c | done 2026-11-18 | 59 | [2026-11-18-sf-region-filter.md](2026-11-18-sf-region-filter.md) |
 | 2026-11-18 | Jotform Attendance dashboard - girls present by club and date replaces the blank-submissions tile | done 2026-11-18 |  | [2026-11-18-sf-dash-club-date-table.md](2026-11-18-sf-dash-club-date-table.md) |
