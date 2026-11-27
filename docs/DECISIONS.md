@@ -872,6 +872,14 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - A true count of new mentors needs a new question on the Monthly Report form ("How many new mentors did you recruit last month?"), outside #80; it would count from the day it is added.
   - `glow/sf_keep_list.csv` item 12 reads `new` until the deploy, then takes the report's id, and its `label_today` and `label_target` become "Partners that recruited new mentors".
 
+### 2026-10-26 — The dashboard's timing: an average-delay metric, and the delay report from 1 September 2026 (#103)
+
+- The Jotform Attendance dashboard shows, from #102's reports, the clubs not submitting last week (a metric and a table by partner, `Clubs_Not_Submitting_Last_Week`), the average days from session to submission of last month (a metric, the average of `Submission_Delay_Days__c` in `Late_Submissions_Last_Month`, which gains an Average summary for it) and the average delay by partner and session month (a bar chart, `Submission_Delay_by_Partner_by_Month`).
+- `Submission_Delay_by_Partner_by_Month` keeps only session dates from 2026-09-01, like the other attendance reports, deployed with the dashboard.
+- **Why:** Ryan, 2026-10-26, on the ticket: the outline's metric of late submissions "over N days" assumed a threshold that DECISIONS 2026-10-23 dropped, so it becomes the average, and a click opens every delay, largest first; the floor drops the February-March 2026 pilot batches, which showed as a blank-partner bar with delays of months. A dashboard component cannot narrow the report to last month, so the chart shows a bar per session month.
+- **Rejected:** a count of every submission of last month (it says nothing about timing); a threshold of any kind (2026-10-23).
+- **Consequences:** if the check-only refuses 22 components, the four go on a new dashboard "Attendance Submissions" in the Attendance folder, named from the Jotform Attendance box (the check-only decides, Ryan 2026-10-26). The rollback of #103 redeploys only the dashboard; the two report edits stay. Plan: `docs/plans/2026-10-23-submission-timing.md`, "Task #103".
+
 ### 2026-10-30 — Photos on the Shared Drive go to its trash 90 days after they arrive
 
 - **The photo mover (`drive-sync/`) moves photos on the company Shared Drive to that drive's trash once they have been there 90 days.** GLOW's CEO approved it on 2026-10-30 (per Ryan). It is trash only: the mover never deletes anything for good and never empties the trash. A Content manager (Ryan's role) can restore an item from the Shared Drive's trash for 30 days; after that Google deletes it ([plan](plans/2026-10-30-photo-retention.md), Context).
