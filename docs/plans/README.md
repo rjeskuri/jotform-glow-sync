@@ -16,6 +16,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-11-25 | The six U.S partners' Monthly Reports through October 2026 count again on the six totals reports | done 2026-11-25 |  | [2026-11-25-sf-us-monthly-totals.md](2026-11-25-sf-us-monthly-totals.md) |
 | 2026-11-23 | The photo folders already on the Shared Drive re-filed once under Region / Partner / Month | done 2026-11-24 |  | [2026-11-23-refile-photo-folders.md](2026-11-23-refile-photo-folders.md) |
 | 2026-11-23 | Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker | done 2026-11-23 |  | [2026-11-23-partner-fill.md](2026-11-23-partner-fill.md) |
+| 2026-11-20 | On-time Monthly Reports - a formula field, an "On Time by Month" chart on D5, item 18's column | done 2026-11-20 |  | [2026-11-20-sf-on-time.md](2026-11-20-sf-on-time.md) |
 | 2026-11-19 | Club-level attendance by week for photo verification - viewer filters on Attendance By Club By Date, a new Girls Present by Club and Week matrix | done 2026-11-19 |  | [2026-11-19-sf-club-week-girls.md](2026-11-19-sf-club-week-girls.md) |
 | 2026-11-19 | Restore the attendance processor after another team's release overwrote it on 2026-10-26 | done 2026-11-19 |  | [2026-11-19-processor-restore.md](2026-11-19-processor-restore.md) |
 | 2026-11-19 | Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name | in-progress |  | [2026-11-19-photo-folders-partner-month.md](2026-11-19-photo-folders-partner-month.md) |

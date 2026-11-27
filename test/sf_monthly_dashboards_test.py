@@ -1739,6 +1739,9 @@ class ReportingDashboardDocs(unittest.TestCase):
         # (GlowReviewReportingDocs checks that #200's rollback names no other change's folder)
         if re.match(r"data/sf_glow_review_(\d{4}-\d\d|<month>)(?![\w-])", p):
             return False
+        # since #119 (on-time Monthly Reports) its own retrieve, `data/sf_on_time_<date>/`, in #119's rollback
+        if re.match(r"data/sf_on_time_(\d{4}-\d\d(-\d\d)?|<date>|<month>)(?![\w-])", p):
+            return False
         if re.match(r"(tools|docs|plans|scripts|glow|test)/", p) or re.search(r"\.(py|md|sh|csv)$", p):
             return p.startswith(("data/", "backups/"))
         return bool(re.match(r"(data|backups)/", p) or re.search(r"(^|/)(build|before|after|backups|data)/", p))
@@ -8066,12 +8069,15 @@ class GlowReviewReportingDocs(unittest.TestCase):
     # --- #200's rollback, in the plan and in the RUNBOOK (review of #200) -------------------------------------
 
     def runbook_rollback(self):
-        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end."""
+        """The RUNBOOK part's rollback of #200: from the line that starts `Rollback` and names #200 to the part's end,
+        or to the next change's rollback (since #119, "Rollback of #119" follows it)."""
         part = self.r.part()
         m = re.search(r"(?im)^\W*rollback\b[^\n]*#200\b", part)
         self.assertTrue(m, f"RUNBOOK section {ReportingDashboardDocs.PART[4:]!r}: no rollback of #200 (a paragraph "
                            "starting `Rollback of #200`)")
-        return part[m.start():]
+        rest = part[m.start():]
+        nxt = re.search(r"(?im)^\W*rollback\s+of\s+#(?!200\b)\d+", rest[1:])
+        return rest[:nxt.start() + 1] if nxt else rest
 
     def assertRollbackOf200(self, raw, where):
         """#200's rollback: the reports and D5 restored by a deploy, from a fresh retrieve edited back or from #200's
