@@ -937,6 +937,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The filters match the partner accounts by name, so a renamed U.S account drops out of the filters and comes back silently on every dashboard and list, until the filter values are renamed with it.
   - A newly inactive partner, or another partner that stops reporting through Jotform, is a new ticket: a fresh retrieve, the filter values edited, check-only, Ryan's go, deploy.
   - The U.S partners stay in `glow/sf_partners.csv` and in Salesforce; only the reports and the dashboard filter leave them out.
+- 2026-11-25: amended by #267 (the 2026-11-25 entry below): six totals reports on D1, D3 and D4 count the U.S Monthly Reports through October 2026 again; every other Monthly report, item 19, the three not-submitted lists and the Partner filter keep this exclusion.
 
 ### 2026-10-26 — Backed-up live writes go through without a prompt
 
@@ -950,6 +951,7 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
 - **Consequences:** CLAUDE.md rule 1, the RUNBOOK, the plan template and the `live-systems` and `salesforce` skills say so. The hook and the settings stay owner edits: Ryan copies the reviewed candidates into `.claude/` by hand, and until then the 2026-10-14 gate asks. Claude Code's auto-mode classifier may still ask about a backed write until Harness changes its text (`user/settings.snippet.json`, its own ticket). The notification reaches a phone only when Remote Control relays the Mac's notifications. The gate checks that a backup from today is on record, not that it is complete or restorable.
 - 2026-11-06: Ryan answered PR #154's three questions yes. A write to `~/.curlrc` (or `$CURL_HOME/.curlrc`) is a self-approval, refused in every mode, and so is a `cp`, `mv`, `ln`, `install`, `rsync` or `ditto` onto it or onto a shell startup file, `.envrc` or `.env`. Every `curl -K`/`--config` is live and never automatic, whatever host it names or none. `sfdx force:source:push` is never automatic, and `sf project deploy start` (or `sf deploy metadata`) is automatic only with an explicit `-d`/`--source-dir`, `-m`/`--metadata` or `-x`/`--manifest`: a source-tracked deploy carries local deletions the gate cannot see.
 - 2026-11-06: Ryan closed #146's review at round 3 ("Do the final review now, no more passes"). Its four findings stay as known limits, listed in RUNBOOK "Live gate (Claude Code)": curl's `$XDG_CONFIG_HOME/curlrc` (no dot) is not protected; a copy onto a protected file followed by a redirect, comment or line break, or of a file named `.curlrc` into a folder, gets no decision; the colon spellings of sf commands are not seen; and no test pins `curl -k` as silent.
+- 2026-11-19 (#204; Ryan, 2026-11-04: "Eliminate me being prompted by sessions for actions unless it is a destructive one"): what changes no record and no metadata passes the gate with no prompt and no backup, in the modes a backed write passes in and from a subagent - a dashboard refresh (`sf api request rest` `PUT` on `/analytics/dashboards/<id>` with no body or `{}`) and a `GET` of the dashboard or its `/status`, a check-only deploy (`sf project deploy start --dry-run`, `sf project deploy validate`, with `-d`, `-x` or `-m`) and `sf data query` (an `--output-file` only inside `data/`). Each passes only as one plain command whose every flag the gate knows, is logged `PASSED` and is not notified. `sf apex run` keeps this decision's rule: a dry run (a savepoint rolled back) cannot be told from its file. The settings' `Read` rules on `data/` are narrowed the same day: DECISIONS 2026-11-05 "A Salesforce plan's folders ask nothing to read".
 
 ### 2026-11-18 — The not-submitted lists leave out obsolete clubs
 
@@ -961,6 +963,21 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - The filter leaves out of the four not-submitted lists every obsolete club, the flagging batch's six-months-without-a-batch clubs included; those are clubs not submitting by definition, so they leave the lists once the batch flags them.
   - `flag` mode never clears a flag: a club brought back stays off the lists until its flag is cleared by hand (RUNBOOK "Deactivating a club", The way back).
   - A club retired from the Roster is flagged by hand at retirement (one record, Ryan's go), not left to the batch.
+
+### 2026-11-05 — A Salesforce plan's folders ask nothing to read; the read rules stand on the personal data
+
+- **The `Read` ask rules in `.claude/settings.json` stand on the personal data only, and `HARNESS_SENSITIVE_PATHS` marks the same paths** (#204, recorded 2026-11-19). The patterns, for review:
+  - `data/*.*`: every file at the top of `data/` - the enrollment, roster, partners, needs-attention, audit, form log, review queue, feedback and club registry exports, and any new one (each has an extension; a plan folder's name has none);
+  - `data/*/*.*`: every file directly in a folder of `data/` - a tool's ledger or plan, a Sheet export (`data/sheet_<date>/`), a folder no rule names yet;
+  - the folders that hold personal data, at any depth: `data/auto_sync/**` (the sync's runs), `data/backfill_*/**` (the attendance back-fill and its rehearsal), `data/clear_*/**`, `data/deactivate_clubs/**`, `data/live_*/**` (form snapshots), `data/module_fix_*/**`, `data/outreach_*/**`, `data/reconcile_*/**`, `data/rename_club/**`, `data/retire_*/**`, `data/reviewqueue_*/**`, `data/roster_*/**`, `data/sheet_*/**`, `data/sf_dupes_*/**` (the duplicate girls' merges) and `data/_from_worktree_*/**` (a worktree's `data/` kept before its land);
+  - `backups/**`, whole; and for the Harness only, as before, `credentials/**`, `.env` and `.env.*`.
+- A Salesforce plan's subfolders - `data/sf_<topic>/before/`, `build/`, `after/` and the others a plan keeps (`evidence/`, a named build) - ask nothing: they hold the metadata a session retrieves, builds, compares and deploys.
+- **Why:** Ryan, 2026-11-05 (Harness session): narrow the `data/` and `backups/` read rules to the folders that hold personal data; Salesforce plan and build folders stop asking. `Read(./data/**)` also asked on every `ls`, `diff` and `patch` of a plan's `build/`. On 2026-11-19 every file in the main checkout's `data/` outside an `sf_` plan folder's subfolders was matched by these patterns (paths checked, no contents read).
+- **Rejected:** an `allow` rule on the plan folders (deny > ask > allow: no allow opens a path under an ask, so the ask list itself is narrowed); one pattern for "every folder but `sf_`" (`data/[!s]*/**`): Claude Code's matcher (node-ignore), the Harness's `fnmatch` and gitignore read `[!…]` and `[^…]` differently; rules naming dated files (a new export would be read unasked).
+- **Consequences:**
+  - A new top-level export, or a file directly in a new folder, still asks; a file deeper in a new folder outside the list does not, until the folder is named here and in the settings.
+  - A plan folder named with a dot (`data/sf_v2.0/`) would be matched whole by `data/*.*`: plan folders keep `sf_<topic>_<date>` names.
+  - The Harness no longer marks a plan's `build/`, `before/` or `after/` sensitive: its read-only allow covers them, and its backup gate treats `build/` as rebuildable (no snapshot before an `rm`) while `before/` and `after/` are still copied.
 
 ### 2026-11-19 — The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger (#228)
 
@@ -982,3 +999,26 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - Ryan asks Cyntexa to leave the three Attendance classes and the trigger out of their releases, or to retrieve from production first.
   - A follow-up ticket proposes a runner check that the live processor still matches ours, so an overwrite shows within a day instead of weeks.
   - Their test class now holds our two adapted methods. Whether their next release would fail its own tests against our processor depends on which test classes it carries and runs (not checked), so the runner check above is the guard, not their tests.
+
+### 2026-11-23 — The photo folders already on the Shared Drive are re-filed once, from a club → partner list (#237)
+
+- The club folders the mover filed directly in the region folders before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/` by `drive-sync/Refile.gs` (`previewRefile`, then `refileExisting`), each folder moved whole, keeping its name and photos.
+- **Partner source, option A** (Ryan, 2026-11-23, ticket #237): a repo tool, `tools/refile_list.py`, reads the sheet's Roster and Partners exports once and produces the club → partner list (`RefileList.gs`, `REFILE_LIST`); the mover uses that list for this one-time re-filing only, and both files are deleted from the live project afterwards. The mover does not read the sheet, and no new OAuth scope is added to the mover project.
+- **Folders with no date** (made before 2026-10-30, named by club only) go to `<Region>/<Partner>/undated/` (Ryan, the same day).
+- **A club whose partner is not found stays where it is** and is listed in the dry run with the reason; so does every folder the plan cannot place unambiguously (two partners for its club, a date that is not a real one, two folders of one name, two partner or month folders of one name, a folder of its name already in the month folder).
+- **Why:** staff asked for the existing club folders to be grouped like the new ones (#225); their names carry no partner, and the mover does not read the sheet.
+- **Consequences:**
+  - The existing folders keep their names: no renaming of old folders or files, and no follow-up ticket for it (Ryan, 2026-11-23).
+  - Ryan reviews `previewRefile`'s log before the real run; what stays is moved by hand or left.
+  - Plan: `docs/plans/2026-11-23-refile-photo-folders.md` (Rollout, Rollback, Result).
+
+### 2026-11-25 — The six totals reports count the U.S partners' Monthly Reports through October 2026 (#267)
+
+- Since #267 six totals reports on D1, D3 and D4 count the six U.S partners' Monthly Reports with `Period__c` before 2026-11-01 (through October 2026) again: Overall Attendance by Month, Participation by Month and Partner (item 3), GLOW Club Each Week (item 4), Club Observations by Month and Partner (item 10), Number of mentors trained about module (item 13) and Number of training sessions led (item 14). In each, #209's locked `DHIS2__c$Account__c notEqual` item is ORed through `booleanFilter` with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` (deploy `0AfRP000002l1XN0AY`, 2026-11-25, on Ryan's go "go with sums"; [plan](plans/2026-11-25-sf-us-monthly-totals.md); RUNBOOK "Monthly Report dashboards in Salesforce").
+- This amends 2026-11-05 (#209) for those six reports only. The reports of who reported, what is approved, on time, and which clubs or modules, and the stories table (item 19), keep the full #209 exclusion, and so do the three not-submitted lists and the Jotform Attendance dashboard's Partner filter.
+- **Why:** Ryan, 2026-11-24/25: the monthly dashboards (D1-D5) should line up with the interactive dashboard, which has no filters. The gap between them, January-October 2026, was exactly the six U.S partners' `Monthly_Total__c` (639), and Ryan took both recommendations: a cutoff through October 2026, and only the totals and trends reports changed.
+- **Rejected:** counting the U.S on every Monthly report, item 19 and the approval and on-time reports too: those track who reported and what is approved, where #209's reason (inactive partners distorting the figures) still holds; counting the U.S Monthly Reports with no cutoff (every month, November 2026 on): the U.S form was disabled on 2026-10-06, so the U.S partners have no active months after October.
+- **Consequences:**
+  - A U.S Monthly Report for November 2026 or later stays out of every report, the six totals reports too.
+  - The kept reports keep the #209 exclusion in every month, so for January-October 2026 a totals report and a who-reported or approval report on the same dashboard count different partners.
+  - The six reports' filters still match the U.S partners by name (2026-11-05); a change to them is a new ticket from a fresh retrieve.

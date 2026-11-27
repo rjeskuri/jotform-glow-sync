@@ -1242,6 +1242,16 @@ the region folders themselves ([retention plan](plans/2026-10-30-photo-retention
 is deleted from Drive until the photo mover's retention is live. Jotform keeps its own copy
 (Auto Delete Submissions stays off, BACKLOG 68).
 
+**The date in a folder's name is the session date** (question 17, the date the mentor picks),
+not the upload date (#225; checked by eye on two folders, 2026-11-23).
+**Planned (#225, not live yet):** the subfolder naming becomes `{Partner} | {Club Name} | {Date} | {Week}` (e.g. `Sunrise Partners | Sunrise Club |
+10-30-2026 | 4`; `{Week}` is question 100, blank for a special event), and the photo mover files
+such a folder under `<Region>/<Partner>/<YYYY-MM>/` ("Photo mover", below). It waits for question
+331 (Partner) to be filled on the forms with the Club picker (a calculation the sync generates,
+CLAUDE.md rule 3; a follow-up ticket); the order and every step: the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout. Until then step 2's naming
+below stands.
+
 `python3 tools/integration_status.py` reads every form's integration: an `ok (one action, …,
 Account_Name__c from q5, …, no upload)` line is right, a mapped photo reads `NOT RIGHT: the
 upload field is ['19'], not []`, and `other integrations:` lists the other blocks the form
@@ -1413,6 +1423,16 @@ owned by Ryan's company account - not the sheet's script, whose scopes must not 
 for 10 minutes from `Attendance photos - <Region>` into that region's folder on the Shared Drive.
 Setup, Script Properties and the push: `drive-sync/README.md`.
 
+**Where a subfolder goes** (#225, in the repo since 2026-11-19; live once pasted, [plan](plans/2026-11-19-photo-folders-partner-month.md)):
+a subfolder named `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (the week blank or left out
+for a special event) goes in `<Region>/<Partner>/<YYYY-MM>/`, the month from its session date;
+the mover finds the partner and month folders by name (one in the trash does not count) and
+makes them when missing. Any other name (`<Club> <MM-DD-YYYY>`, the club alone, a blank partner,
+a date that is not a real date) goes directly in the region folder, as before. The subfolder's
+own name never changes, and a same-name folder counts only at its own path (a merge, a
+`REFUSED`). The folders already on the Shared Drive stay where they are until their one-time
+re-filing ("Re-filing the existing folders (#237)", below: their names carry no partner).
+
 The order, each live step on Ryan's go (Ryan, 2026-10-22):
 
 1. PR #91 lands: code only, nothing live.
@@ -1481,8 +1501,90 @@ no new scope, no new service):
    the plan's Result. From then on the mover removes the emptied subfolders (step 6 of the
    paste above).
 
+**Updating the live project (#225)** (Ryan, on his go; the
+[plan](plans/2026-11-19-photo-folders-partner-month.md), Rollout): `removeTrigger`, the same
+paste of `Plan.gs` and `Mover.gs` (the manifest unchanged: no new scope, no new service),
+`previewMoves` (the existing subfolders log as before, without a target path; nothing changes),
+then `installTrigger`. The new code files only the new naming under partner and month, so it
+can go live before any form's naming changes.
+
+**Re-filing the existing folders (#237)** (Ryan, once, on his go, after #225's naming is live on
+the forms; the [plan](plans/2026-11-23-refile-photo-folders.md), Rollout). The club folders the
+mover filed before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/`, or
+`<Region>/<Partner>/undated/` for a name with no date, keeping their names and photos. In short:
+the Roster and Partners exports, `tools/refile_list.py` (it writes `RefileList.gs`, the club →
+partner list), `removeTrigger`, the paste of `drive-sync/Refile.gs` and that file into the
+project, `installTrigger`, `previewRefile` (the dry run: every folder directly in a region folder
+with its target, or its code and reason for staying; it reads one folder per Drive call, #262, so
+run it again until a run logs `cycle complete`, each `TIME_BUDGET` line saying what is left),
+**Ryan reviews that log**, then `refileExisting` likewise until a run moves nothing and logs no
+`TIME_BUDGET`, `previewRefile` again (`would refile 0`), and both files
+deleted from the project. A folder whose partner is not found stays where it is, listed with the
+reason. Undo: move a folder back into the region folder by hand (nothing is renamed or deleted).
+`REFILE_FAILED <Region> "<name>"`: Drive refused the move, or its read-back does not show the
+folder in its month folder; the rest goes on, the run ends in an error, look for the folder by
+hand.
+
+**Updating the live project (retention, #183)** (on Ryan's go; the
+[retention plan](plans/2026-10-30-photo-retention.md), Rollout). The retention code (#182, #185,
+#191, #265) goes live with `RETENTION_DAYS` unset and is switched on only after a dry run Ryan
+reads. The account that runs the mover is no member of the Shared Drive (it reaches the region
+folders through folder sharing), so the retention read lists one folder per Drive call (#265),
+from the region folders down, and a big Shared Drive takes several runs to read. Each run reads
+on from where the last one stopped: the progress is in the Script Properties
+`RETENTION_STATE_PREVIEW_*` (`previewMoves`) and `RETENTION_STATE_APPLY_*` (`moveSettledPhotos`),
+kept apart, and is not to be edited. Only the run that completes the read plans, logs `would
+trash` and, on the real run, trashes. Nothing is planned or trashed from a partial read.
+
+1. Ryan: `removeTrigger` (`removeTrigger: 1 trigger(s) deleted; the mover is stopped`).
+2. Claude, on Ryan's go: `clasp pull` of the live project first (the backup, and which commit
+   is live), then main's `drive-sync/Plan.gs` and `Mover.gs` pushed with clasp 2.4.2 on Node 18
+   on the company login (`~/.config/clasp-company/`, not the global login `appsscript/` uses).
+   The manifest is unchanged: no new scope, no new service. Then `clasp pull` again and compare
+   with main. clasp 2.4.2 can print `Pushed N files.` after an error and exit 0 (#225's Result),
+   so the read-back decides. Or Ryan pastes the two files whole.
+3. Ryan: `previewMoves` with `RETENTION_DAYS` unset: `retention off (RETENTION_DAYS not set)`,
+   the moves as before, no `CONFIG refused`.
+4. Ryan: Script Properties → `RETENTION_DAYS` = `90`.
+5. Ryan: `previewMoves`, **repeated while the retention read is unfinished**. A run that has not
+   read the whole tree logs `TIME_BUDGET: retention read not complete (run N of it: F folder(s)
+   listed, L found and not listed yet, K KB kept): nothing planned or trashed this run; the next
+   run reads on`, and no `would trash` line. The next run starts with `retention read: carrying
+   on from the last run (…)`. Each dry run reads for about 4.5 minutes. Run it again until a run
+   logs `retention read complete: N folder(s) listed in R run(s)` and then, per region, `would
+   trash N file(s) and M folder(s)`. That run's log is the plan to read (the plan's Rollout, step
+   4). Nothing on the Shared Drive changes. The dry run's progress is its own: the real run reads
+   afresh.
+6. Ryan: `installTrigger`. The real run reads in the same way, for about 3 minutes a run (it keeps
+   the rest of its budget for the trash). Its first runs log the same `TIME_BUDGET: retention read
+   not complete …` line and trash nothing. The run that completes the read plans and trashes
+   (`trashed N file(s) and M folder(s)`), and the next run starts a new read.
+7. The plan's Result: the dates (UTC), the runs each read took, the counts.
+
+What else a retention line can say:
+
+- `retention read: … changed since the last run`, `… could not be read`, `… began more than 24
+  hours ago`: what was kept is dropped and the read starts again by itself. Nothing to do.
+- `RETENTION_FAILED the read (run N of it, …)`: Drive refused a listing. Nothing is planned or
+  trashed, and the run ends in an error. What was read is kept, and the next run tries that folder
+  again. `The attempted action requires shared drive membership.` there is a bug (every listing
+  names one folder): delete `RETENTION_DAYS` and stop.
+- `RETENTION_FAILED the progress kept for the next run (…): K KB … not kept`: the Script
+  Properties are full (9 KB a value, 500 KB in all, every property counted). An unfinished
+  `previewMoves` read keeps its `RETENTION_STATE_PREVIEW_*` values until a later `previewMoves`
+  completes it. Finish it, or delete those values (Project Settings → Script Properties), never a
+  `SOURCE_`/`TARGET_FOLDER_` one or `RETENTION_DAYS`. If it fails still, the Shared Drive is too
+  big for this read: delete `RETENTION_DAYS` and open a ticket.
+
+Rollback: delete `RETENTION_DAYS` (retention is off from the next run; the `RETENTION_STATE_*`
+values are then unused and may be deleted); the code: the previous `Plan.gs` and `Mover.gs`,
+pushed or pasted back.
+
 What the log says, per region: `move N, merge N (F file(s) in, K kept), waiting N, refused N,
 remove N, rescue N`, then the folders by name (club and date; never a file's name or contents).
+A subfolder filed under a partner and month has its target after its name: `would move "<name>"
+to <Region>/<Partner>/<YYYY-MM>` (the dry run), `move "<name>" to …` (the real run); one filed
+directly in the region folder has none.
 
 - **move**: a folder of that name was made in the region's folder and the subfolder's files
   moved into it (Drive cannot move the folder itself, #132); the emptied subfolder stays in My
@@ -1512,8 +1614,11 @@ remove N, rescue N`, then the folders by name (club and date; never a file's nam
 - **TIME_BUDGET**: the run stopped reading after about 2 minutes (half its budget), or stopped
   moving at 4.5; what it did not read is not touched, and the next run carries on (a move cut
   short, its folder made and some files moved, is finished by the next run as a merge).
-- **REFUSED**: two or more folders of that name on the Shared Drive already. Move or merge it by
-  hand (pick the right folder), or rename one of the two there.
+- **REFUSED**: two or more folders of that name on the Shared Drive already (at its path). Move
+  or merge it by hand (pick the right folder), or rename one of the two there. `REFUSED "<name>"
+  to <Region>/<Partner>/<YYYY-MM>: 2 folders named "<Partner>" in the region folder` (or `named
+  "<YYYY-MM>" in "<Partner>"`, #225): two partner (or month) folders of one name; nothing of that
+  subfolder moves until the two are merged by hand into one.
 - **UNKNOWN**: a folder that is no region's; left alone.
 - **CONFIG refused**: a Script Property is missing or wrong (half a pair, an id used twice, a
   source folder not named `Attendance photos - <Region>`, a Shared Drive folder not named exactly
@@ -1888,11 +1993,24 @@ retired club's girls. Delete that leftover question in the builder first.
 it, and unhidden every mentor sees an optional box: on a form with the Club
 picker the sync hides it (`HIDE partner textbox (q331: no rule shows it; …)`,
 written after the rules). It is still submitted, blank, so the staff
-notification e-mail's "Partner" row is empty from then on. The runner does
+notification e-mail's "Partner" row is empty from then on (until the Partner fill below). The runner does
 not count the hide as a change: it rides along with the next roster change
 it applies on that form, or a hand apply, and that run's SyncLog `detail`
 does not name it (the run's log does: `HIDE partner textbox`). Since 2026-09-30
 it is hidden on all five forms.
+
+**The Partner fill** (#236, [plan](plans/2026-11-23-partner-fill.md)) fills the hidden q331 with
+the picked club's partner, one calculation per partner, for the photo folders' names and the
+staff e-mail. It is turned on by hand, once per form, with `--partner-fill` on the sync (backup,
+dry run, apply, `form_status.py`); from then on the form's own rules keep it on and the runner
+keeps it (it never passes the flag). Refused on a form without the Club picker, and while a rule
+still shows q331 (`--same-name-switch` first). Rollback: `restore_conditions.py` with
+`--from properties-<stamp>.json`, the `backup_forms.py` snapshot taken before it (`--force` if it
+refuses a club renamed or retired since), then at once the sync by hand without the flag
+(`--region` on a regional form; dry run, `--apply`) and `form_status.py`. The dry run must print
+no `Partner fill:` line (`form_status.py` reads CLEAN with the fill on): with no calculation into
+q331 the fill stays off, and a club added since the backup gets back the rules the restore took
+from it, which the runner, reading a rules-only difference as `in-sync`, would never write.
 
 ### The one-time switch (`--same-name-switch`)
 
@@ -2686,7 +2804,7 @@ when nothing matches it creates a new, partner-less Club account.
   - The first plan run, 39779117991, was refused: `HTTP 400 invalid_app_access` (the app's policies lacked the System Administrator profile, Setup step 2). Ryan added it.
   - Run 39780929667: describe ok; 455 Accounts read, 372 Club (equal to the count from Ryan's `glow` login on 2026-10-21); check 317 ok, 5 need a person. Those five were fixed by hand on Ryan's go (4 partner-less club accounts parented, 1 club account created).
   - Run 39784745392: 456 Accounts, 373 Club; check 322 ok, 0 need a person. `SF_SYNC=apply` since 12:52 UTC.
-  - **Still to do:** check the first automatic creates by hand (ATTENTION table, `created … check it by hand (first creates)`).
+  - 2026-11-26: the first 20 automatic creates (2026-10-23 to 2026-11-26) checked by hand: each a Club account under its partner, Description `created by the automatic sync <date>`, one account per name. `CONFIRM_CREATES` has been off since then: a create is a log line, not an ATTENTION item.
 - **Dry run:** `SF_SYNC=plan`: every account it would create is an ATTENTION item with the body.
 - **Apply:** `SF_SYNC=apply` (with `AUTO_SYNC_APPLY=1`), Ryan's go.
 - **Verify:** the run's `SF:` log lines; the local cross-check, below.
@@ -2801,7 +2919,7 @@ or a command line.
 | `… - not created`: nearly the same name, or a character not yet seen in question 5 | A spelling a person must judge | Check, then create by hand with the body shown |
 | `… - not created`: partner not in `glow/sf_partners.csv` | A new partner | Add one line, `partner,sf_account_id,sf_account_name`, for its Household account (create that first if needed); commit; the next run proceeds. Check its account name against the Monthly Reports' "test" filter ("The keep list") |
 | `more than 5 … none created` | A wave of new clubs | Create by hand from the bodies listed, or let the next runs take them |
-| `created … check it by hand (first creates)` | Shown until the first creates are checked | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
+| `created … check it by hand (first creates)` | Off since 2026-11-26 (`CONFIRM_CREATES` in `tools/sf_new_clubs.py`); only if it is turned on again | Read the account: name, Club, parent, Description (`created by the automatic sync <date>`); its owner and creator are Ryan |
 | `check by hand: the create's outcome is not as planned` | Salesforce did not answer clearly | Read the name in Salesforce **ten minutes later**. One account, right: nothing to do. None: create by hand. Two: delete the newer (no Contacts). |
 | `N club account(s) need a person` | The check found a club whose account is missing, partner-less, under another partner, twice, not a Club, or carrying another code; or a partner-less stray | Each line names the fix |
 | `partner map out of date` | A partner account was renamed in Salesforce | Update its line in `glow/sf_partners.csv`; check the new name against the Monthly Reports' "test" filter ("The keep list") |
@@ -3251,6 +3369,22 @@ and its empty `Girls_Present__c` is not a 0, so the blank-submissions report doe
 `sf_girls_present.py check` leaves merged corrections out (Signals, below). The message is
 filtered on, never selected or printed (on other batches it can quote a name).
 
+**A wrong answer fixed on request** (a mentor asks for a field to be changed, not girls added;
+first done 2026-11-23: the GLOW Club Year 2 → 3 on one Latin America submission and its batch).
+The value lives in two places, and both are fixed:
+- **Salesforce:** the batch and every `Attendance__c` row under it (the rows carry their own
+  `Module__c`, `Module_Week__c` and `Module_Year__c`). Read the batch and its rows first; then
+  the write connector, one record per call, Ryan's go, and read everything back. A batch `PATCH`
+  runs none of the processor (after-insert trigger only).
+- **Jotform:** `GET /submission/{id}` saved to `data/` first, then `POST /submission/{id}`
+  form-urlencoded `submission[<qid>]=<value>`, then read back. A change of year moves the module
+  answer too: the year (q94), the module dropdown of the new year (`glow.sync.MODULES`: q14,
+  q92, q93) and the hidden `Year_ID` (q102); `Module_ID` (q98) and `Week_ID` (q100) as needed.
+  Observed on 2026-11-23: **an empty value does not clear an answer** (the old year's module
+  dropdown keeps its answer; harmless, since what reads the module goes by the dropdown the year
+  names), and **the edit did not re-send the submission to Salesforce** (no new batch for the
+  club and date 20 minutes later), so no duplicate batch to deal with.
+
 **The measure** (Ryan's decisions of 2026-10-19, ticket #59,
 [plan](plans/2026-10-20-girls-attended-tiles.md); it replaces the two measures of 2026-10-15,
 ticket #35):
@@ -3668,7 +3802,8 @@ sharing stays as it is"):
   6. Check after: retrieve again into a dated folder (as `after/`) and compare with the edited
      copy. Run one changed report through the Analytics API, and compare its totals with SOQL.
 
-**Refreshing through the API** (the PUT is gated by the live gate: Ryan's go): `sf api request rest
+**Refreshing through the API** (since #204 the PUT with an empty body passes the live gate with no
+prompt; with `?filter1=` in the path it is judged as a write): `sf api request rest
 '/services/data/v62.0/analytics/dashboards/01ZRP00000BE2TR2A1' -o glow -X PUT -b '{}'`.
 - One partner's view: put `?filter1=<option id>` in the path. A `filters` list in the body is
   ignored, and each partner's view has its own cached results.
@@ -3951,6 +4086,28 @@ login `glow` or the read-only connector; counts and partner names only):
   Attendance_Batch__c WHERE Creator__c = 'Jotform' AND Processing_Status__c = 'Success' AND
   Attendance_Date__c >= N_MONTHS_AGO:11 GROUP BY Account__r.Parent.Name, Session_Month__c`.
 
+**Club-level attendance for photo checks** (#226; not among the four timing reports above):
+
+- `Girls_Present_by_Club_and_Week` ("Girls Present by Club and Week", `00ORP000009tUjR2AU`, a
+  matrix on `Attendance_Totals`, standalone, not on the dashboard; #226, 2026-11-19) is the report
+  for checking mentors' photos against attendance: rows partner then club, columns the session
+  week, each cell the sum of `Girls_Present__c` of the week's Jotform sessions (`Creator__c`
+  starts with `Jotform`, `Processing_Status__c` `Success`; partner reports left out). A girl at
+  two sessions in a week counts twice. Show Details lists each session: batch, session date,
+  module and module week. Its date filters (default `N_WEEKS_AGO:8` to `THIS_WEEK`) and Region
+  (`Account__c.Partner_Region__c`), Partner and Club (`contains`) are unlocked: any viewer changes
+  them in the Filters panel. A matrix takes two row groupings, so Region is a filter, not a row.
+  Check (sum per club and week in a script; `Session_Week__c` is a formula SOQL cannot group):
+  `SELECT Account__r.Parent.Name, Account__r.Name, Session_Week__c, Girls_Present__c FROM
+  Attendance_Batch__c WHERE
+  Processing_Status__c = 'Success' AND Creator__c LIKE 'Jotform%' AND Attendance_Date__c >=
+  N_WEEKS_AGO:8 AND Attendance_Date__c <= THIS_WEEK`. ([plan](plans/2026-11-19-sf-club-week-girls.md))
+- "Attendance By Club By Date" (`Attendance_By_Club_By_Week_Wdl`, `00ORP000007uBRN2A2`, a summary
+  on `Accounts_Contacts_Attendance`) lists each girl's attendance by club and date. Since #226
+  (2026-11-18) its Region, Partner and Club filters (`contains`) are unlocked for any viewer, and
+  its date range is the attendance date, last 90 days by default (until then the club account's
+  created date, this year).
+
 Not confirmed offline: SOQL often refuses `GROUP BY`, `AVG` or `MAX` on a formula field
 (`Session_Week__c`, `Session_Month__c`, `Submission_Delay_Days__c`). The `GROUP BY` statements
 above are the first try. When SOQL refuses one, the check that the plan's Task #102 Rollout step 7 runs is
@@ -4171,14 +4328,18 @@ back:
   District (`001RP00000VxX9PYAV`), region U.S: 11 Club accounts, 46 Monthly Reports in 2026.
 - Since #209 every Monthly report on D1-D5 and item 19, the stories table, filters
   `DHIS2__c$Account__c notEqual` the six U.S partners, a locked criteria item beside the test
-  rule. D1-D5 themselves are unchanged; the U.S Monthly Reports of January-October 2026 leave them
-  retroactively.
+  rule. Since #267 six totals reports pair that item, by an OR in their `booleanFilter`, with a
+  locked `DHIS2__c$Period__c lessThan 11/1/2026`, so on those six the U.S Monthly Reports before
+  2026-11-01 count again ("The U.S Monthly Reports through October 2026", below). D1-D5
+  themselves are unchanged; until #267 the U.S Monthly Reports of January-October 2026 left every
+  component retroactively, and since #267 they leave the other Monthly reports only.
 - The three monthly partners' Monthly Reports stay on D1-D5: those partners do report, through
   Salesforce.
 - Item 6 and the attendance-row reports are unchanged by #209, because the U.S has no batches.
 - The SOQL signals in this section equal the dashboards' components only with
   `AND Account__r.Name NOT IN (<the six>)` added to their `WHERE` since #209, because the
-  components leave out the six U.S partners.
+  components leave out the six U.S partners, except the six totals reports, which since #267
+  equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` instead.
 
 Rollback of #209 ([plan](plans/2026-11-05-sf-us-partners.md#rollback); DECISIONS 2026-10-16),
 VPN off, after a check-only, on Ryan's go:
@@ -4187,6 +4348,47 @@ VPN off, after a check-only, on Ryan's go:
   `data/sf_us_partners_2026-11-05/before/` only while a fresh retrieve equals `after/`.
 - The copies in Decommissioned (tagged `#209`) are the record of what the reports were, not the
   restore; item 11's metadata copy stays there too.
+- Never from an older build or retrieve. Nothing is deleted.
+
+**The U.S Monthly Reports through October 2026** (#267, Ryan, 2026-11-24/25: the monthly
+dashboards line up with the interactive dashboard; [plan and
+Result](plans/2026-11-25-sf-us-monthly-totals.md); DECISIONS 2026-11-25), deployed 2026-11-25 on
+Ryan's go, "go with sums", given on the prep's check-only `0AfRP000002kzKH0AY` (after the go a
+fresh retrieve, the check-only `0AfRP000002l1Nh0AI`, then deploy `0AfRP000002l1XN0AY`), and read
+back. Since #267 six totals reports count the six U.S partners' Monthly Reports with
+`Period__c` before 2026-11-01 again, the months the U.S partners were active (their form was
+disabled on 2026-10-06):
+- Overall Attendance by Month (`00ORP000009p0FJ2AY`, D1).
+- Participation by Month and Partner (`00ORP000005rSbB2AU`, item 3).
+- GLOW Club Each Week (`00ORP000005ufOz2AI`, item 4).
+- Club Observations by Month and Partner (`00ORP000004RJZD2A4`, item 10).
+- Number of mentors trained about module (`00ORP000004RJZE2A4`, item 13).
+- Number of training sessions led (`00ORP000004RJZ82AO`, item 14).
+
+The six reports' filter: in each, the locked #209 item `DHIS2__c$Account__c notEqual` the six is
+ORed with a new locked criteria item `DHIS2__c$Period__c lessThan 11/1/2026` through
+`booleanFilter` (filter logic), for example `1 AND 2 AND (3 OR 5) AND 4` on Overall Attendance by
+Month (each report's filter logic is in the plan's Result). The other items (the reporting year,
+the account not blank, the account name not containing "test", a report's own) stay ANDed. Their
+SOQL signals equal `AND (Account__r.Name NOT IN (<the six>) OR Period__c < 2026-11-01)` added to
+the `WHERE`; on 2026-11-25 Overall Attendance by Month showed 49,976 for January-October 2026,
+the U.S 639 of it, equal to SOQL.
+- Every other Monthly report, the 15 kept on D1-D5 (who reported, what is approved, on time,
+  which clubs or modules) and item 19 (the stories table), keeps the full #209 exclusion.
+- Item 6 (Modules Implemented by Month and Partner, `00ORP000009kUNh2AM`, report type
+  `Attendance_Totals`) is unchanged by #267, with no #209 item, because the U.S has no batches.
+- The three not-submitted lists and the Jotform Attendance dashboard's Partner filter are
+  unchanged by #267: they still leave out the six U.S partners.
+- A U.S Monthly Report for November 2026 or later stays out of every report, the six totals
+  reports too.
+
+Rollback of #267 ([plan](plans/2026-11-25-sf-us-monthly-totals.md#rollback); DECISIONS
+2026-10-16), VPN off, after a check-only, on Ryan's go:
+- The six totals reports are restored by a deploy from a fresh retrieve with the `booleanFilter`
+  and the Period item removed, or from #267's own `data/sf_us_monthly_2026-11-25/before/` only
+  while a fresh retrieve of the six equals `after/`.
+- The copies in Decommissioned (tagged `#267`) are the record of what the reports were, not the
+  restore.
 - Never from an older build or retrieve. Nothing is deleted.
 
 ### Decommissioned
@@ -5253,7 +5455,13 @@ What each one counts (`DHIS2__c`, one Monthly Report per partner per month):
   (`00ORP000005p2L32AI`): one row per Monthly Report with its stories (outstanding stories, peer
   support, community impact, success story, personal growth). Its "Formatted Report" export cuts
   every story at 255 characters (#201, tested 2026-11-04 through the Reports API's Excel export,
-  lengths only).
+  lengths only), and so does the Reports API's run (255 and "..."). **To export
+  the full stories:** open the report, the arrow beside Edit → Export → **Details Only**, Format
+  "Comma Delimited .csv", Export (the .xlsx format was not tested). Proved 2026-11-19 (#201, lengths only): the Details
+  Only .csv of 421 rows kept every story whole, its longest story per column equal to SOQL's
+  over the 2026 reports with its filters, U.S partners included (468 rows: 4,065, 4,039, 4,372
+  and 4,770 characters), where the Reports API run of the same 421 rows
+  stops at 257. A spreadsheet cell holds 32,767 characters, far above the longest story.
 - The approval overview (#200) is the new report "Approval Status by Month"
   (`00ORP000009p0qb2AA`, `Approval_Status_by_Month`, in "GLOW Monthly Reports") shown on D5 as a
   stacked column (`ColumnStacked`), "Monthly Report Approval Status: Approved vs Not Yet Approved
@@ -5629,7 +5837,7 @@ The live commands of the procedure refuse without `--vpn-off`: the word that you
 
 - **When:** corrected re-submissions the processor failed whole as `Duplicate` before 2026-10-24
   (it merges a correction since: ticket #108); their girls are missing from that club and day.
-- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)); the live run waits for Ryan's go.
+- **Status:** built 2026-10-24 (ticket #109, [plan](plans/2026-10-24-resend-duplicate-batches.md)). Run live 2026-10-26 (#153): 19 corrections re-sent (72 rows, 12 new girls). 12 batches from 2 clubs are held for GLOW (the plan's Result).
 - **Dry run:** `python3 tools/sf_backfill.py resend --vpn-off` (it reads Salesforce, so `--vpn-off` too).
 - **Apply:** `resend --apply --vpn-off --limit 1`, read back, then the rest, Ryan's go.
 - **Verify:** every copy is read back as it is sent; `sf_backfill.py status`.
@@ -5741,6 +5949,18 @@ writes go through without a prompt"):
   is the go), and is refused where no prompt can show: a command that is chained
   or prefixed, a tool on no list, plan mode (a hook's `allow` has no effect
   there). `GLOW_LIVE_OK` grants nothing (DECISIONS 2026-10-14).
+- What changes no record and no metadata passes with no prompt and no backup, in
+  the same modes and from a subagent (ticket #204): a dashboard refresh (`sf api
+  request rest /services/data/vNN.N/analytics/dashboards/<id> -X PUT`, with no
+  body or `-b '{}'`) and a GET of the dashboard or its `/status`; a check-only
+  deploy (`sf project deploy start --dry-run` or `sf project deploy validate`,
+  with `-d`, `-x` or `-m`); and `sf data query` (an `--output-file` only inside
+  `data/`). Each is logged `PASSED`, with no notification. It passes only as one
+  plain command whose every flag the hook knows, with no `--apply` or
+  `--rehearse` in it: a chain, a pipe, a redirect, a wrapper, another body,
+  method, path or flag, `deploy quick`, `--metadata-dir` or a request from a file
+  is judged as above, and a destructive deploy asks. `sf apex run` gets no pass:
+  a dry run cannot be told from its file.
 
 Live:
 
@@ -5750,7 +5970,7 @@ Live:
 - the raw APIs the tools wrap: `api.jotform.com`, the Sheets writes
   (`values().update|append|clear`, `batchUpdate`, `apply_changes=True`);
 - Salesforce through `sf` or `sfdx`: a deploy (`project deploy
-  start|quick|validate`, a check-only one too; `deploy metadata`), `project
+  start|quick|validate`, a check-only one too unless it is plain, above; `deploy metadata`), `project
   delete source`, `data create|update|delete|upsert|import`, `apex run`, the
   `force:` apex, source, mdapi and data commands, the REST API itself
   (`.salesforce.com/services/`), `sf api request graphql`, and `sf api request
@@ -5906,7 +6126,13 @@ prompt was shown only in an interactive session: a headless run's ask is logged
 `.claude/settings.json` backs the hook with `ask` rules on the deletes only (`sf
 data delete`, `sf project delete source`, `gh variable|secret delete|remove`):
 a hook's `allow` does not get past an `ask` rule, so the families with an
-automatic go have none. In `dontAsk` only allow-listed commands run, so the
+automatic go, and #204's passes, have none. Its `Read` `ask` rules stand on the
+personal data only (Ryan, 2026-11-05; DECISIONS 2026-11-05): every file at the
+top of `data/` and directly in one of its folders, all of the folders that hold
+personal data (`auto_sync/`, `backfill_*`, `live_*`, `sf_dupes_*` and the others
+listed there), and all of `backups/`; a Salesforce plan's `before/`, `build/`
+and `after/` ask nothing. `HARNESS_SENSITIVE_PATHS` marks the same paths, with
+`credentials/` and `.env`. In `dontAsk` only allow-listed commands run, so the
 backups a headless run takes have `allow` rules: `backup_forms.py`, `sheets_client.py
 export` and `export-all`, `github_switches.py backup` and `sf project retrieve
 start`. It also has `onFailure: block`, so a hook that fails
