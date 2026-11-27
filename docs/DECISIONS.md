@@ -990,6 +990,16 @@ an earlier one says so, and the earlier one gets a dated bullet pointing at it. 
   - `installTriggers` is idempotent for the new trigger: it deletes any `syncFormChoicesHourly` trigger before creating one. No new Google service, so no new OAuth scope.
   - The RUNBOOK's club procedures and the tools' "Next" hints say "the hourly refresh, or the menu for at once".
 
+### 2026-11-19 — The attendance processor is ours to deploy; another team's release restored over (#238)
+
+- Cyntexa's release of 2026-10-26 (`0AfRP000002i8aD0AQ`) replaced `AttendanceBatchProcessor` and its two test classes with their pre-October copy, wrapped in their error logging. On Ryan's go (2026-11-19) our last live version (2026-10-24) was deployed back (`0AfRP000002kdV30AI`). Their logging was not kept, and two methods of their `AttendanceBatchProcessorTest` were adapted so that no test fails in production.
+- **Why:** their copy dropped four fixes (one insert per batch, `Girls_Present__c`, name cleaning, merging a mentor's correction). For three and a half weeks corrections failed as Duplicates and November's batches had no count. Their `try/catch` returned null where our code rethrows, so a failure inside a step could leave a batch marked Success with missing rows.
+- **Rejected:** merging their logging into our version (the catch-and-return-null pattern hides exactly the failures the processor reports as Failed batches); a renamed processor of our own (it protects only while their release leaves the trigger out; kept as the next step if the overwrite happens again).
+- **Consequences:**
+  - Ryan asks Cyntexa to leave the three Attendance classes and the trigger out of their releases, or to retrieve from production first.
+  - A follow-up ticket proposes a runner check that the live processor still matches ours, so an overwrite shows within a day instead of weeks.
+  - Their test class now holds our two adapted methods. Whether their next release would fail its own tests against our processor depends on which test classes it carries and runs (not checked), so the runner check above is the guard, not their tests.
+
 ### 2026-11-23 — The photo folders already on the Shared Drive are re-filed once, from a club → partner list (#237)
 
 - The club folders the mover filed directly in the region folders before #225 are moved once under `<Region>/<Partner>/<YYYY-MM>/` by `drive-sync/Refile.gs` (`previewRefile`, then `refileExisting`), each folder moved whole, keeping its name and photos.
