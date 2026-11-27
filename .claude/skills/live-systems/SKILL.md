@@ -36,6 +36,18 @@ plain command (the salesforce skill has the shapes). The hook
 is a seatbelt: it does not see the connectors or a write through another program, and a write it
 does not see needs Ryan's explicit go in this conversation. RUNBOOK "Live gate (Claude Code)".
 
+**One live command per call** (#251): run each live command alone in its Bash call - no `cd`, VPN
+probe, `.env` sourcing (`set -a; . .env; ...`) or variable assignments (`F=...;`) in front - from
+the checkout, with the tools' own paths and flags (and `-o glow` for `sf`). Before an `sf` command
+or a Salesforce tool, run `scripts/vpn_check.sh` as its own call (`vpn: off`, exit 0; allowed with
+no prompt); the tools' `--vpn-off` runs it too. The gate sees through three wrappers only, judging
+what they wrap as it would alone: a leading `cd <a folder inside the checkout> &&`, a leading
+`scripts/vpn_check.sh &&`, and a trailing `| jq <filter>` or `| python3 -c '<snippet>'` that reads
+standard input only (the salesforce skill has the shapes); anything else chained or in front asks.
+Ad-hoc Salesforce reads: `sf data query ... -o glow --json` alone, or the read-only `Global_Glow_SF`
+connector - never Python from standard input or the scratchpad; a one-off live script is a file
+under its plan folder (`data/sf_<topic>/`).
+
 ## Writers (one per row; every other command is read-only or writes only under `data/` and `backups/`)
 | Writer | What it changes | Saved before the write | Rollback |
 |---|---|---|---|

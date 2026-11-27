@@ -16,11 +16,12 @@ Beside the client, what every Salesforce tool relies on: the org's record types,
 accounts on hold; how the attendance processor compares a submitted club name with an Account's
 (sf_match); the groups of Accounts the Account duplicate rule reports (duplicate_account_groups);
 the characters no name may hide (has_invisible); the error codes of an answer, never its words
-(error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools' --vpn-off
-(add_vpn_flag, require_vpn_off). Their owner-only files: glow/private_files.py. And what the
-automatic runner watches (#242, after incident #238): the attendance processor's Apex against the
-build we deployed (apex_fingerprint, expected_apex from glow/apex_fingerprints.json,
-apex_attention) and Jotform batches that stop arriving (batch_gap_attention).
+(error_codes); the partner map (glow/sf_partners.csv, read_partners); and the tools' --vpn-off and
+the VPN check behind it (add_vpn_flag, require_vpn_off, VPN_CHECK: scripts/vpn_check.sh). Their
+owner-only files: glow/private_files.py. And what the automatic runner watches (#242, after
+incident #238): the attendance processor's Apex against the build we deployed (apex_fingerprint,
+expected_apex from glow/apex_fingerprints.json, apex_attention) and Jotform batches that stop
+arriving (batch_gap_attention).
 """
 import argparse
 import csv
@@ -323,20 +324,39 @@ def has_invisible(name):
 
 # ---- the tools' command lines ---------------------------------------------------------------------
 VPN_REFUSAL = ("this command talks to Salesforce from this Mac: check that no VPN is on, then add --vpn-off "
-               "(a connection through a VPN froze Ryan's user on 2026-09-30)")
+               "(scripts/vpn_check.sh; a connection through a VPN froze Ryan's user on 2026-09-30)")
+# the VPN check require_vpn_off runs beside --vpn-off (ticket #251): its argv, read at each call - the
+# tests put a stand-in here (test/helpers/__init__.py); it must exit 0 and print `vpn: off` first
+VPN_CHECK = [os.path.join(REPO, "scripts", "vpn_check.sh")]
+VPN_CHECK_TIMEOUT = 15      # seconds; a check that hangs refuses
 
 
 def add_vpn_flag(parser):
     """--vpn-off on a (sub)command that talks to Salesforce from this Mac; require_vpn_off() reads it."""
     parser.add_argument("--vpn-off", action="store_true",
-                        help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one)")
+                        help="you checked: no VPN is on (Salesforce freezes a user whose API call comes through one); "
+                             "scripts/vpn_check.sh runs as well, and refuses while a tunnel is up")
 
 
 def require_vpn_off(args):
-    """Refused unless the operator said --vpn-off: Salesforce freezes a user whose API call comes
-    through a VPN."""
+    """Refused unless the operator said --vpn-off AND the VPN check (VPN_CHECK) exits 0 with `vpn: off`
+    as the first line it prints: Salesforce freezes a user whose API call comes through a VPN. A
+    check that says a tunnel is up, fails, cannot run or hangs refuses: it fails closed."""
     if not getattr(args, "vpn_off", False):
         raise Refused(VPN_REFUSAL)
+    check = list(VPN_CHECK)
+    try:
+        done = subprocess.run(check, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=VPN_CHECK_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise Refused(f"--vpn-off, but the VPN check could not run ({type(e).__name__}): run scripts/vpn_check.sh "
+                      "alone and read what it says") from None
+    lines = done.stdout.splitlines()
+    if done.returncode == 0 and lines and lines[0] == "vpn: off":
+        return
+    said = (lines[0].strip() if lines else "") or (done.stderr.strip().splitlines() or ["nothing"])[0]
+    raise Refused(f"--vpn-off, but the VPN check says {said!r} (exit {done.returncode}): turn the VPN off, run "
+                  "scripts/vpn_check.sh until it says `vpn: off`, then run the command again")
 
 
 def positive(text):

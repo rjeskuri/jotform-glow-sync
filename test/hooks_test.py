@@ -21,15 +21,21 @@ the rest of the gate, protected_paths.sh and the pre-commit hook: test/hooks_*_t
     a wrapper, a quick deploy, destructive changes or a --metadata-dir beside --dry-run, a query
     that carries a live flag, a live command whose text only mentions one of these; anonymous Apex
     stays as #146 left it (the gate cannot tell a dry run from its file);
+  - live_gate.sh, ticket #251 (Ryan, 2026-11-20: fewer prompts from how a command is written): three
+    wrappers are transparent - a leading `cd <a folder inside the checkout> &&`, a leading
+    `scripts/vpn_check.sh &&`, a trailing pipe into a read-only jq or a python3 -c snippet that reads
+    standard input only - and what they wrap is judged as it is alone (a cd's command from the folder
+    the cd names); any other wrapper is judged as before (LiveGateWrappers);
   - .claude/settings.json: the permission rules behind the hook (gh api allowed and never asked:
     an ask would stall the harness's resume reads; no ask rule on an automatic family or a #204
     pass - a hook's allow does not get past one -, ask rules kept on the deletes; the Read ask
     rules only on the personal-data exports in data/ and on backups/, never on a Salesforce plan's
     before/, build/ or after/ (Ryan's ruling, 2026-11-05), and HARNESS_SENSITIVE_PATHS marking the
-    same; the hook entry that blocks on failure).
+    same; the hook entry that blocks on failure; since #251 the VPN check allowed alone).
 """
 import fnmatch
 import json
+import os
 import re
 import unittest
 
@@ -279,6 +285,193 @@ class LiveGatePasses(HookFixture, unittest.TestCase):
         self.assert_refused_never_asked(refused)
 
 
+@needs_bash
+class LiveGateWrappers(HookFixture, unittest.TestCase):
+    # ---- live_gate.sh: ticket #251 (Ryan, 2026-11-20: cut the prompts that come from how a session writes
+    # a command, not from what it does). Three wrappers are transparent: a leading `cd <a folder inside
+    # the checkout> &&` - relative from the input's cwd, or absolute: the checkout itself, a worktree under
+    # .claude/worktrees/ -, a leading `scripts/vpn_check.sh &&` (it exits 1 while a tunnel is up, so &&
+    # runs nothing then), and a trailing pipe into a read-only jq (a filter on standard input) or a
+    # python3 -c snippet that reads standard input only. What they wrap gets the answer it gets alone: a
+    # #204 pass is allowed (PASSED), a backed write gets the automatic go (AUTO-APPROVED), a write without
+    # its backup and a delete ask. Ruling (test-author, #251): `cd X && C` from the cwd W is C from W/X -
+    # its relative paths and clasp's project are that folder's -, so a cd cannot move clasp to another
+    # project's folder behind the gate's back. Any other wrapper is none, judged as before: a cd out of
+    # the checkout (a temporary folder, ~, a sibling whose path starts with the checkout's, .. climbing
+    # out) or to a path the gate cannot read ($( ), a variable - Ruling: never expanded), ; or || for &&,
+    # a look-alike of the check or an assignment before it, a variable assignment, .env sourced, an inline
+    # VPN probe; a pipe into python3 -, a script, sh or tee, a jq that writes or reads a file, a python3
+    # -c snippet that writes, reads a file or runs what it reads. One mode, default: #146's and #204's
+    # tests walk the modes and callers
+    QUERY = 'sf data query -q "SELECT Id FROM Account LIMIT 1" -o glow --json'
+    DASHBOARD = "sf api request rest /services/data/v60.0/analytics/dashboards/01Z5g000000AbCdEAF/status -o glow"
+    BACKED = "sf project deploy start --source-dir data/sf_x/after -o glow"           # data/sf_x/before/ is from today
+    UNBACKED = "sf project deploy start --source-dir data/sf_y/after -o glow"         # data/sf_y/ has no before/
+    LISTED = "python3 tools/sf_partner_monthly.py --month 2026-09 --apply --vpn-off"  # its own ledger row (#146)
+    DELETE = "sf data delete record -s Contact -i 003000000000001 -o glow"
+    CLASP = "npx clasp push -f"
+    CHECK = "scripts/vpn_check.sh"
+    JQ = "jq '.result.totalSize'"
+    PY = "python3 -c 'import json, sys; print(json.load(sys.stdin)[\"result\"][\"totalSize\"])'"
+
+    def wrapper_project(self, destructive=False):
+        """A clean committed checkout (appsscript/; drive-sync/ beside it, another clasp project), form
+        F1's backup from today, the plan data/sf_x/ with its before/ from today and data/sf_y/ with none,
+        a worktree folder under .claude/worktrees/, and a sibling folder <checkout>-elsewhere. With
+        destructive: a destructiveChanges.xml in a past plan's folder (data/sf_old/del/) that no deploy
+        here names, and the plan data/sf_z/ - its before/ from today - whose after/ holds one."""
+        p = self.project(git=True)
+        self.back_up(p, "jotform", self.F1, f"backups/{self.F1}")
+        self.salesforce_before(p, "data/sf_x/before/Contact.object-meta.xml")
+        for plan in ("sf_x", "sf_y"):
+            self.write(p, f"data/{plan}/after/main/default/reports/Attendance.report-meta.xml", "<Report/>\n")
+        self.write(p, "drive-sync/.clasp.json", '{"scriptId": "fictional-drive-sync", "rootDir": "."}\n')
+        self.write(p, ".claude/worktrees/t-9-fictional/README.md", "A fictional worktree.\n")
+        os.makedirs(p + "-elsewhere")
+        if destructive:
+            self.write(p, "data/sf_old/del/destructiveChanges.xml", "<Package/>\n")
+            self.salesforce_before(p, "data/sf_z/before/Contact.object-meta.xml")
+            self.write(p, "data/sf_z/after/main/default/reports/Attendance.report-meta.xml", "<Report/>\n")
+            self.write(p, "data/sf_z/after/destructiveChanges.xml", "<Package/>\n")
+        return p
+
+    def transparent(self, p):
+        """(wrapped, its cwd, the command alone, the cwd it runs in alone, the verdict, the reason's first
+        word) - cwds from the checkout, or absolute."""
+        wt = os.path.join(p, ".claude", "worktrees", "t-9-fictional")
+        q, b, d = self.QUERY, self.BACKED, self.DELETE
+        return [
+            # a #204 pass: allowed with no prompt and no backup, as alone
+            (f"cd data/sf_x && {q}", ".", q, "data/sf_x", "allow", "PASSED"),
+            (f"cd {p} && {q}", "data", q, ".", "allow", "PASSED"),
+            (f"cd {wt} && {self.DASHBOARD}", ".", self.DASHBOARD, wt, "allow", "PASSED"),
+            (f"{self.CHECK} && {q}", ".", q, ".", "allow", "PASSED"),
+            (f"{q} | {self.JQ}", ".", q, ".", "allow", "PASSED"),
+            (f"{q} | {self.PY}", ".", q, ".", "allow", "PASSED"),
+            (f"cd data/sf_x && {self.CHECK} && {q} | jq -r .result.records", ".", q, "data/sf_x", "allow", "PASSED"),
+            # a backed write: the automatic go, as alone
+            (f"cd {p} && {b}", "data", b, ".", "allow", "AUTO-APPROVED"),
+            (f"cd {p} && {self.jotform_write()}", ".", self.jotform_write(), ".", "allow", "AUTO-APPROVED"),
+            (f"{self.CHECK} && {self.LISTED}", ".", self.LISTED, ".", "allow", "AUTO-APPROVED"),
+            (f"{b} --json | jq -r .result.status", ".", f"{b} --json", ".", "allow", "AUTO-APPROVED"),
+            # ... judged from the folder the cd names: clasp pushes that folder's project
+            (f"cd appsscript && {self.CLASP}", ".", self.CLASP, "appsscript", "allow", "AUTO-APPROVED"),
+            (f"cd ../drive-sync && {self.CLASP}", "appsscript", self.CLASP, "drive-sync", "ask", "LIVE"),
+            # a write without its backup, a delete: asked, as alone
+            (f"cd {p} && {self.UNBACKED}", ".", self.UNBACKED, ".", "ask", "LIVE"),
+            (f"{self.CHECK} && {self.UNBACKED}", ".", self.UNBACKED, ".", "ask", "LIVE"),
+            (f"cd {p} && {d}", ".", d, ".", "ask", "LIVE"),
+            (f"{self.CHECK} && {d}", ".", d, ".", "ask", "LIVE"),
+            (f"{d} --json | {self.JQ}", ".", f"{d} --json", ".", "ask", "LIVE"),
+        ]
+
+    def opaque(self, p):
+        """(command, its cwd, the verdict): "ask" for a backed write (alone: the automatic go) behind a
+        wrapper that is none; "not allow" for a query (alone: allowed) piped into what is no read-only
+        filter on standard input."""
+        b, q = self.BACKED, self.QUERY
+        return [
+            (f"cd {self.side.name} && {b}", ".", "ask"),                  # a folder outside the checkout
+            (f"cd {p}-elsewhere && {b}", ".", "ask"),                    # its path starts with the checkout's
+            (f"cd ~ && {b}", ".", "ask"),
+            (f"cd data/../.. && {b}", ".", "ask"),                       # .. climbing out
+            (f'cd "$(git rev-parse --show-toplevel)" && {b}', ".", "ask"),
+            (f"cd $CLAUDE_PROJECT_DIR && {b}", ".", "ask"),
+            (f"cd {p}; {b}", ".", "ask"),
+            (f"{self.CHECK}; {b}", ".", "ask"),                          # the write runs with the VPN on too
+            (f"{self.CHECK} || {b}", ".", "ask"),                        # ... and only then
+            (f"scripts/vpn_check_old.sh && {b}", ".", "ask"),
+            (f"TZ=UTC {self.CHECK} && {b}", ".", "ask"),
+            ("F=data/sf_x/after; sf project deploy start --source-dir $F -o glow", ".", "ask"),
+            (f"set -a; . .env; set +a; {b}", ".", "ask"),
+            (f"route -n get default | grep interface && {b}", ".", "ask"),
+            (f"{b} --json | python3 -", ".", "ask"),
+            (f"{q} | python3 -", ".", "not allow"),                      # standard input is the program
+            (f"{q} | python3 data/sf_x/summarize.py", ".", "not allow"),
+            (f"{q} | sh", ".", "not allow"),
+            (f"{q} | tee data/sf_x/accounts.json", ".", "not allow"),
+            (f"{q} | jq . > data/sf_x/accounts.json", ".", "not allow"),
+            (f"{q} | jq . data/sf_x/other.json", ".", "not allow"),
+            (f"{q} | jq -f data/sf_x/prog.jq", ".", "not allow"),
+            (f"{q} | python3 -c 'import sys; open(\"data/sf_x/out.json\", \"w\").write(sys.stdin.read())'", ".", "not allow"),
+            (f"{q} | python3 -c 'print(open(\"data/sf_x/q.soql\").read())'", ".", "not allow"),
+            (f"{q} | python3 -c 'import os, sys; os.system(sys.stdin.read())'", ".", "not allow"),
+        ]
+
+    def first_word(self, run):
+        """The reason's first word: PASSED (#204), AUTO-APPROVED (#146), LIVE (the prompt), BLOCKED."""
+        return (self.reason(run).split() or [""])[0]
+
+    def as_alone(self, p, rows):
+        """The gate's cases for transparent rows (transparent's shape) in `p`: each wrapped, then alone."""
+        where = lambda rel: os.path.normpath(os.path.join(p, rel))
+        cases = []
+        for wrapped, cwd, alone, alone_cwd, _verdict, _kind in rows:
+            cases += [(wrapped, dict(project=p, cwd=where(cwd), may_allow=True)),
+                      (alone, dict(project=p, cwd=where(alone_cwd), may_allow=True))]
+        return cases
+
+    def check_as_alone(self, rows, runs):
+        """Each row's run wrapped and alone (the control), from as_alone's cases: both get the verdict
+        named, the wrapped one the same kind of reason; the runs it read."""
+        for n, (wrapped, _cwd, alone, alone_cwd, verdict, kind) in enumerate(rows):
+            (_, _, run), (_, _, control) = runs[2 * n], runs[2 * n + 1]
+            with self.subTest(command=wrapped):
+                self.assertEqual(self.verdict(control), verdict, f"the control - {alone!r} alone from {alone_cwd}: "
+                                 + self.show(control))
+                self.assertEqual(self.verdict(run), verdict, f"not judged as {alone!r} alone - " + self.show(run))
+                self.assertEqual(self.first_word(run), kind, "not the answer the command alone gets - " + self.show(run))
+                if verdict == "ask":
+                    self.check_reason(wrapped, self.reason(run))
+        return runs[2 * len(rows):]
+
+    def test_a_safe_wrapper_is_judged_as_the_command_it_wraps_and_any_other_is_not(self):
+        # DoD: a leading in-repo cd, a leading scripts/vpn_check.sh and a read-only trailing jq or python3
+        # -c are transparent, the wrapped command judged as it would be alone; a cd outside the
+        # repository, a wrapper around a delete and any other prefix still ask. Each transparent row is run
+        # wrapped and alone (the control): both get the verdict named, with the same kind of reason
+        p = self.wrapper_project()
+        where = lambda rel: os.path.normpath(os.path.join(p, rel))
+        rows, others = self.transparent(p), self.opaque(p)
+        cases = self.as_alone(p, rows)
+        cases += [(command, dict(project=p, cwd=where(cwd), may_allow=True)) for command, cwd, _ in others]
+        cases.append((self.CHECK, dict(project=p, cwd=p, may_allow=True)))
+        rest = self.check_as_alone(rows, self.verdicts(cases))
+        for (command, _cwd, verdict), (_, _, run) in zip(others, rest):
+            with self.subTest(command=command):
+                if verdict == "ask":
+                    self.assertEqual(self.verdict(run), "ask", "a wrapper that is none - " + self.show(run))
+                    self.check_reason(command, self.reason(run))
+                else:
+                    self.assertNotEqual(self.verdict(run), "allow", "a pipe that is no read-only filter - " + self.show(run))
+        with self.subTest(command=self.CHECK):
+            self.assertEqual(self.verdict(rest[-1][2]), "silent", "the VPN check alone: no decision (the settings "
+                                                                  "allow it) - " + self.show(rest[-1][2]))
+
+    def test_a_wrapper_s_own_words_name_no_deploy_folder(self):
+        # DoD (the wrapped command judged as it would be alone; PR #254's review, medium): the folders a
+        # deploy names, searched for a destructiveChanges*.xml, are the wrapped command's - not the cd's
+        # destination nor a jq filter (.) read as a folder - so a destructiveChanges.xml elsewhere in the
+        # checkout (data/sf_old/del/) changes nothing; one in the folder the wrapped deploy names still
+        # makes it a delete that asks, where without it the plan's before/ from today is the automatic go
+        p = self.wrapper_project(destructive=True)
+        dry = "sf project deploy start --dry-run -d data/sf_y/after -o glow --json"
+        own = "sf project deploy start --source-dir data/sf_z/after -o glow"   # data/sf_z/after/destructiveChanges.xml
+        rows = [
+            (f"cd {p} && {self.BACKED}", "data", self.BACKED, ".", "allow", "AUTO-APPROVED"),
+            (f"{dry} | jq .", ".", dry, ".", "allow", "PASSED"),
+            ("cd data && sf project deploy start --dry-run -d sf_y/after -o glow", ".",
+             "sf project deploy start --dry-run -d sf_y/after -o glow", "data", "allow", "PASSED"),
+            # the safety side: its own folder's destructiveChanges.xml asks, wrapped as alone
+            (f"cd {p} && {own}", "data", own, ".", "ask", "LIVE"),
+        ]
+        runs = self.verdicts(self.as_alone(p, rows))
+        self.check_as_alone(rows, runs)
+        with self.subTest(command=rows[-1][0]):
+            self.assertIn("delet", self.reason(runs[-2][2]).lower(), "the ask does not call it a delete - "
+                          + self.show(runs[-2][2]))
+
+
 class GateSettings(unittest.TestCase):
     """.claude/settings.json, the second layer behind live_gate.sh: the rules read as Claude Code
     reads them (research on 2.1.299, 2026-10-14): Bash(x:*) is Bash(x *), which needs a word
@@ -469,8 +662,9 @@ class GateSettings(unittest.TestCase):
                 self.assertTrue(self.covering("allow", command), f"no allow rule lets a headless run take {command!r}")
                 self.assertEqual(self.covering("ask", command), [], "an ask rule would stall a headless backup")
                 self.assertEqual(self.covering("deny", command), [])
-        self.assertEqual(sorted(allow), sorted(self.ALLOW_BEFORE + self.BACKUP_RULES),
-                         "the allow list is 2026-10-26's with the three backup rules, and nothing else")
+        self.assertEqual(sorted(allow), sorted(self.ALLOW_BEFORE + self.BACKUP_RULES + [self.VPN_CHECK_RULE]),
+                         "the allow list is 2026-10-26's with the three backup rules and the VPN check (#251), "
+                         "and nothing else")
         self.assertEqual(len(allow), len(set(allow)), "a rule listed twice")
         # no allow rule lets a live write or a delete past the hook's decision
         for command in (self.AUTO_FAMILIES + self.DELETE_FAMILIES
@@ -479,6 +673,23 @@ class GateSettings(unittest.TestCase):
                            "sf project deploy start --source-dir data/sf_x/before -o glow"]):
             with self.subTest(command=command, check="no allow"):
                 self.assertEqual(self.covering("allow", command), [], f"an allow rule covers the live {command!r}")
+
+    # ticket #251: the VPN check a session runs as its own call before an sf command (read-only: route and
+    # ifconfig) - allowed alone, so it never prompts, in a headless run neither; the rule is the whole
+    # command, so nothing chained to it, no flag and no look-alike rides on it
+    VPN_CHECK_RULE = "Bash(scripts/vpn_check.sh)"
+
+    def test_the_vpn_check_runs_without_a_prompt_and_nothing_rides_on_its_rule(self):
+        self.assertIn(self.VPN_CHECK_RULE, self.permissions["allow"])
+        self.assertTrue(self.covering("allow", "scripts/vpn_check.sh"), "no allow rule for scripts/vpn_check.sh")
+        self.assertEqual(self.covering("ask", "scripts/vpn_check.sh"), [], "an ask rule would prompt the VPN check")
+        self.assertEqual(self.covering("deny", "scripts/vpn_check.sh"), [])
+        for command in ("scripts/vpn_check.sh && sf data delete record -s Contact -i 003000000000001 -o glow",
+                        "scripts/vpn_check.sh; python3 -", "scripts/vpn_check.sh > .claude/live_backups.log",
+                        "scripts/vpn_check.sh --anything", "scripts/vpn_check_old.sh", "scripts/vpn_check.sh.bak"):
+            with self.subTest(command=command):
+                self.assertEqual([r for r in self.covering("allow", command) if "vpn_check" in r], [],
+                                 f"the VPN check's rule covers {command!r}")
 
     # ---- the Read rules (#204, Ryan's ruling of 2026-11-05): a Salesforce plan's before/, build/ and
     # after/ - what a session retrieves, builds and deploys - ask nothing; the personal-data exports still

@@ -238,6 +238,21 @@ class LiveGateDocs(unittest.TestCase):
     def test_the_deploy_skill_says_the_push_goes_through_once_committed(self):
         self.assert_push_goes_through_on_its_own(flat(read(DEPLOY_SKILL)), "the deploy-appsscript skill")
 
+    # ---- ticket #251: the VPN check a session runs as its own call before any sf command is named where
+    # a session reads rule 12 - CLAUDE.md's rule itself (in its 73 lines, test above) and the salesforce
+    # and live-systems skills. What they say of it, and of one live command per call and the read paths,
+    # is the reviewer's to judge
+    def test_rule_12_and_the_salesforce_and_live_systems_skills_name_the_vpn_check(self):
+        part = md_part(CLAUDE_MD, "## Things Claude gets wrong")
+        m = re.search(r"^12\. .*?(?=^13\. |\Z)", part, re.S | re.M)
+        self.assertIsNotNone(m, "no rule 12 in CLAUDE.md's Things Claude gets wrong")
+        skills = os.path.join(REPO, ".claude", "skills")
+        for where, text in (("CLAUDE.md rule 12", m.group(0)),
+                            ("the salesforce skill", read(os.path.join(skills, "salesforce", "SKILL.md"))),
+                            ("the live-systems skill", read(os.path.join(skills, "live-systems", "SKILL.md")))):
+            with self.subTest(where):
+                self.assertTrue("scripts/vpn_check.sh" in text, f"{where} does not name scripts/vpn_check.sh")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

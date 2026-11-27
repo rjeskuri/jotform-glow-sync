@@ -54,12 +54,29 @@ description: Salesforce for this project - what lives there (attendance batches 
 - **VPN off before any `sf` command or any tool that talks to Salesforce from the Mac.**
   Salesforce freezes a user whose connection comes through an anonymising VPN and revokes all their
   tokens, the Jotform connection's included (2026-09-30); only another administrator can unfreeze,
-  then Jotform is re-authorised on the five forms (`tools/integration_status.py`). The tools refuse
-  without `--vpn-off`: the word that you checked.
+  then Jotform is re-authorised on the five forms (`tools/integration_status.py`). Check with
+  `scripts/vpn_check.sh`, run as its own call (allowed alone, no prompt): `vpn: off` (exit 0), or
+  `vpn: on <iface>` (exit 1: a tunnel carries the default route or holds an IPv4 address), and it
+  fails closed when it cannot tell. Never probe inline (`route -n get default | grep interface && sf
+  ...`, an `ifconfig` loop). The tools refuse without `--vpn-off`, the word that you checked, and run
+  the same check before they call: a tunnel that is up refuses even with `--vpn-off` (#251).
+- **One live command per call** (#251): each `sf` command or live tool alone in its Bash call, with
+  nothing in front - no `cd`, no VPN probe, no `.env` sourcing (`set -a; . .env; set +a; ...`), no
+  variable assignments (`F=...;`) - from the checkout, with `-o glow` and the tools' own paths and
+  flags (`--source-dir data/sf_<topic>/after`, `--dir`, `--plan`). The live gate sees through three
+  wrappers only, judging what they wrap as it would alone: a leading `cd <a folder inside the
+  checkout> &&`, a leading `scripts/vpn_check.sh &&`, and a trailing `| jq <filter>` or
+  `| python3 -c '<snippet>'` that reads standard input only (jq: `-r -c -e -j -S -M -s -a` and one
+  filter, no `$`/`env`/`import`; python3: imports from json, sys, csv, collections, re, math,
+  statistics, datetime, itertools, and nothing that opens a file, runs a program or reads the
+  environment). Anything else chained or in front asks Ryan, as before.
 - **Reads**: the read-only connector `Global_Glow_SF` (`soqlQuery`, `getObjectSchema`, …); or
-  Ryan's CLI login, alias `glow` (`sf data query -o glow`, `sf org display --target-org glow`). A
-  plain `sf data query` passes the live gate with no prompt (#204; an `--output-file` only inside
-  `data/`).
+  Ryan's CLI login, alias `glow` (`sf data query -q "..." -o glow --json`, `sf org display
+  --target-org glow`). A plain `sf data query` passes the live gate with no prompt (#204; an
+  `--output-file` only inside `data/`), alone or piped into a read-only jq or `python3 -c` as above.
+  An ad-hoc read is one of these, never Python from standard input (`python3 -`) or a scratchpad
+  script; a one-off live script is a file under its plan folder (`data/sf_<topic>/`), where the
+  gate (an Apex `--file`) and Ryan can read it.
   Never `sf org auth show-access-token`, `show-sfdx-auth-url`, `show-user-password` or
   `SF_TEMP_SHOW_SECRETS`: they print the token.
 - **Record writes**: the write connector `Global_Glow_Full_Access`, one record per call, by the

@@ -90,6 +90,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import sf_record_flags as sfr            # noqa: E402  (red until tools/sf_record_flags.py exists)
+import helpers                           # noqa: E402,F401  the VPN check's stand-in (#251)
 from glow import salesforce              # noqa: E402
 from glow.sync import PARTNER_COLS       # noqa: E402  (the Partners tab's columns: partner, region, notes, jotform)
 
