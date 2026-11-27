@@ -142,7 +142,8 @@ All on 2026-11-04 UTC, VPN off, on Ryan's go.
   - The live Partner Manager filter has 6 options, none the former PO's; the Month filter 12.
 - Item 19's long stories: the "Formatted Report" export cuts every story at 255 characters
   (tested 2026-11-04 by #201 through the Reports API's Excel export, lengths only); the "Details
-  Only" export is #201's to prove.
+  Only" .csv export keeps them whole (proved 2026-11-19 by #201: 421 rows, the longest story per
+  column equal to SOQL's; RUNBOOK "GLOW Club Reporting").
 
 `data/sf_glow_review_2026-11/reporting/` (before/, copies/, build/, after/) is in the ticket
 worktree, untracked: move it to the main checkout before land.

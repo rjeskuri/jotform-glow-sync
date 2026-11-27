@@ -62,12 +62,16 @@ function installTriggers() {
   const ss = SpreadsheetApp.getActive();
   ScriptApp.getProjectTriggers().forEach(function (t) {
     const fn = t.getHandlerFunction();
-    if (fn === 'onAnyFormSubmit' || fn === 'sendSfPendingDigest') ScriptApp.deleteTrigger(t);
+    if (fn === 'onAnyFormSubmit' || fn === 'sendSfPendingDigest' || fn === 'syncFormChoicesHourly') {
+      ScriptApp.deleteTrigger(t);
+    }
   });
   ScriptApp.newTrigger('onAnyFormSubmit').forSpreadsheet(ss).onFormSubmit().create();
   ScriptApp.newTrigger('sendSfPendingDigest').timeBased()
       .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
-  audit_('installTriggers', 'form-submit router + Monday e-mail (ReviewQueue + SF Pending)');
+  ScriptApp.newTrigger('syncFormChoicesHourly').timeBased().everyHours(1).create();
+  audit_('installTriggers', 'form-submit router + Monday e-mail (ReviewQueue + SF Pending) + ' +
+         'hourly Club Roster Form dropdown refresh');
 }
 
 /** Installable on-form-submit trigger for the whole spreadsheet. */
