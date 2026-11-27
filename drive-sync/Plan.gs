@@ -20,21 +20,32 @@
  *                file in the trash is still in it); `trashed` true when the folder is in Drive's
  *                trash, its `files` then what Jotform wrote into it after the mover trashed it
  *                (#144, the rescue), never a file a person trashed
- * targetFolders  {<Region>: {id, subfolders: [{id, name, files: [{id, name, size}]}]}}
+ * targetFolders  {<Region>: {id, subfolders: [{id, name, path, files: [{id, name, size}]}]}}
  *                the Shared Drive's region folders; their subfolders need only be the ones whose
- *                name a source subfolder has (Mover.gs looks those up by name)
+ *                name a source subfolder has, at that subfolder's path (Mover.gs looks those up by
+ *                name). path: the folder's place below the region folder ([] or absent: directly
+ *                in it; [<Partner>, <YYYY-MM>]: in those two folders)
  *
- * moves    [{region, id, name, to, files}]  the name is not yet in the region folder (to): Mover.gs
- *          makes a folder of that name there and moves `files` (ALL the subfolder's file ids)
- *          into it, since Drive cannot move a My Drive folder into a Shared Drive (#132); the
- *          emptied subfolder stays in My Drive until a later run removes it
- * merges   [{region, id, name, into, files, kept}]  the name is already there once: `files` (ids)
- *          move into that folder, `kept` (ids) stay because a file of the same name and size is
- *          already there; nothing on the Shared Drive is ever replaced
- * waiting  [{region, id, name}]  a file changed less than settleMinutes ago (still uploading), or
- *          a subfolder of the same name in that region is moved, or merged with files, this run
- *          (a merge whose files are all kept moves nothing and never waits)
- * refused  [{region, id, name}]  two or more subfolders of that name on the Shared Drive already
+ * The layout (#225, docs/plans/2026-11-19-photo-folders-partner-month.md): a subfolder named
+ * `<Partner> | <Club Name> | <MM-DD-YYYY> | <Week>` (each form's Drive integration names it; the
+ * week blank or left out for a special event) is filed at `<Region>/<Partner>/<YYYY-MM>/`, the
+ * month from its session date (question 17); any other name directly in the region folder, as
+ * before. photoPath_(name) gives that path. A subfolder's name is never changed. Same-name
+ * matching (merge, refused, one per name per run) is by name AND path: a folder of that name at
+ * another path does not count.
+ *
+ * moves    [{region, id, name, path, to, files}]  the name is not yet at its path: Mover.gs makes
+ *          a folder of that name there (first the path's folders under the region folder `to`,
+ *          when missing) and moves `files` (ALL the subfolder's file ids) into it, since Drive
+ *          cannot move a My Drive folder into a Shared Drive (#132); the emptied subfolder stays
+ *          in My Drive until a later run removes it
+ * merges   [{region, id, name, path, into, files, kept}]  the name is already at its path once:
+ *          `files` (ids) move into that folder, `kept` (ids) stay because a file of the same name
+ *          and size is already there; nothing on the Shared Drive is ever replaced
+ * waiting  [{region, id, name, path}]  a file changed less than settleMinutes ago (still
+ *          uploading), or a subfolder of the same name in that region is moved, or merged with
+ *          files, this run (a merge whose files are all kept moves nothing and never waits)
+ * refused  [{region, id, name, path}]  two or more subfolders of that name at its path already
  * unknown  [{id, name}]          `Attendance photos - <x>` where x is no region, or has no target
  * remove   [{region, id, name}]  (#144) not in the trash, no file, no subfolder, and the folder
  *          itself unchanged for at least settleMinutes: Mover.gs re-lists it and, still empty,
@@ -83,6 +94,13 @@
  * Both throw when retentionDays is not a whole number of at least RETENTION_MIN_DAYS, planTrash_
  * also when maxFiles is not a whole number of at least 1. Like planMoves_, they touch no Google
  * service and do not change their inputs.
+ *
+ *   photoPath_(name) -> [<Partner>, 'YYYY-MM'] for a layout name, [] for any other
+ *
+ * A layout name: split at `|`, each part trimmed; three parts (partner, club, date) or four (the
+ * week last: any text, blank allowed); partner and club not blank; the date MM-DD-YYYY and a real
+ * calendar date. Anything else (a legacy `<Club> <MM-DD-YYYY>` or the club alone, a blank partner,
+ * 02-30-2026, 2026-10-30, five parts) gives [].
  */
 
 const PHOTO_PREFIX = 'Attendance photos - ';
@@ -109,17 +127,19 @@ function planMoves_(sourceFolders, targetFolders, now, settleMinutes) {
         if (isRemovable_(sub, nowMs, settleMs)) plan.remove.push({ region: region, id: sub.id, name: sub.name });
         continue;
       }
-      const entry = { region: region, id: sub.id, name: sub.name };
+      const path = photoPath_(sub.name);
+      const entry = { region: region, id: sub.id, name: sub.name, path: path };
       const newest = Math.max.apply(null, sub.files.map(f => f.updated.getTime()));
       if (nowMs - newest < settleMs) {
         plan.waiting.push(entry);
         continue;
       }
-      const there = target.subfolders.filter(t => t.name === sub.name);
+      const there = target.subfolders.filter(t => t.name === sub.name && samePath_(t.path, path));
       if (there.length > 1) {
         plan.refused.push(entry);
         continue;
       }
+      // the path follows from the name, so one claim per name is one per name and path
       const claimed = Object.prototype.hasOwnProperty.call(acted, sub.name);
       if (!there.length) {
         if (claimed) {
@@ -127,11 +147,12 @@ function planMoves_(sourceFolders, targetFolders, now, settleMinutes) {
           continue;
         }
         acted[sub.name] = true;
-        plan.moves.push({ region: region, id: sub.id, name: sub.name, to: target.id, files: sub.files.map(f => f.id) });
+        plan.moves.push({ region: region, id: sub.id, name: sub.name, path: path, to: target.id,
+                          files: sub.files.map(f => f.id) });
         continue;
       }
       const isDuplicate = f => there[0].files.some(t => t.name === f.name && t.size === f.size);
-      const merge = { region: region, id: sub.id, name: sub.name, into: there[0].id,
+      const merge = { region: region, id: sub.id, name: sub.name, path: path, into: there[0].id,
                       files: sub.files.filter(f => !isDuplicate(f)).map(f => f.id),
                       kept: sub.files.filter(isDuplicate).map(f => f.id) };
       // a merge that moves nothing (every file already there) changes nothing, so it does not
@@ -145,6 +166,23 @@ function planMoves_(sourceFolders, targetFolders, now, settleMinutes) {
     }
   }
   return plan;
+}
+
+function photoPath_(name) {
+  const parts = String(name).split('|').map(p => p.trim());
+  if (parts.length !== 3 && parts.length !== 4) return [];
+  const date = /^(\d{2})-(\d{2})-(\d{4})$/.exec(parts[2]);
+  if (!parts[0] || !parts[1] || !date) return [];
+  const month = Number(date[1]), day = Number(date[2]), year = Number(date[3]);
+  const real = new Date(Date.UTC(year, month - 1, day));
+  if (real.getUTCFullYear() !== year || real.getUTCMonth() !== month - 1 || real.getUTCDate() !== day) return [];
+  return [parts[0], date[3] + '-' + date[1]];
+}
+
+/** A target subfolder's path (absent: []) is `want`. */
+function samePath_(path, want) {
+  const p = Array.isArray(path) ? path : [];
+  return p.length === want.length && p.every((x, i) => x === want[i]);
 }
 
 /** The region's target folder: only for a region in PHOTO_REGIONS that targetFolders has as its own key. */
