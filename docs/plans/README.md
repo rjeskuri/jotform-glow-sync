@@ -13,7 +13,14 @@ names the BACKLOG items a plan is about. Newest first.
 
 | Date | Plan | Status | BACKLOG | File |
 |---|---|---|---|---|
+| 2026-11-25 | The six U.S partners' Monthly Reports through October 2026 count again on the six totals reports | done 2026-11-25 |  | [2026-11-25-sf-us-monthly-totals.md](2026-11-25-sf-us-monthly-totals.md) |
+| 2026-11-23 | The photo folders already on the Shared Drive re-filed once under Region / Partner / Month | done 2026-11-24 |  | [2026-11-23-refile-photo-folders.md](2026-11-23-refile-photo-folders.md) |
+| 2026-11-23 | Question 331 (Partner) filled with the picked club's partner on the forms with the Club picker | done 2026-11-23 |  | [2026-11-23-partner-fill.md](2026-11-23-partner-fill.md) |
+| 2026-11-20 | On-time Monthly Reports - a formula field, an "On Time by Month" chart on D5, item 18's column | done 2026-11-20 |  | [2026-11-20-sf-on-time.md](2026-11-20-sf-on-time.md) |
 | 2026-11-20 | The two club-days the November back-fill skipped - AusCam Club 3 2026-10-03 merged, San Pedro Sacatepequez 2026-10-17 sent as a special event | done 2026-11-27 |  | [2026-11-20-backfill-two-club-days.md](2026-11-20-backfill-two-club-days.md) |
+| 2026-11-19 | Club-level attendance by week for photo verification - viewer filters on Attendance By Club By Date, a new Girls Present by Club and Week matrix | done 2026-11-19 |  | [2026-11-19-sf-club-week-girls.md](2026-11-19-sf-club-week-girls.md) |
+| 2026-11-19 | Restore the attendance processor after another team's release overwrote it on 2026-10-26 | done 2026-11-19 |  | [2026-11-19-processor-restore.md](2026-11-19-processor-restore.md) |
+| 2026-11-19 | Photo folders filed Region / Partner / Month on the Shared Drive, the week number in the folder name | in-progress |  | [2026-11-19-photo-folders-partner-month.md](2026-11-19-photo-folders-partner-month.md) |
 | 2026-11-19 | The Club Roster Form's dropdowns refresh hourly, by an Apps Script trigger | accepted |  | [2026-11-19-hourly-club-roster-refresh.md](2026-11-19-hourly-club-roster-refresh.md) |
 | 2026-11-18 | A Region filter on the Jotform Attendance dashboard, through Account.Partner_Region__c | done 2026-11-18 | 59 | [2026-11-18-sf-region-filter.md](2026-11-18-sf-region-filter.md) |
 | 2026-11-18 | Jotform Attendance dashboard - girls present by club and date replaces the blank-submissions tile | done 2026-11-18 |  | [2026-11-18-sf-dash-club-date-table.md](2026-11-18-sf-dash-club-date-table.md) |
@@ -38,7 +45,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-10-24 | The GLOW Club Attendance dashboard (D1) and its reports by Partner and Month, last 12 months | done 2026-10-26 |  | [2026-10-24-sf-dash-attendance.md](2026-10-24-sf-dash-attendance.md) |
 | 2026-10-24 | The corrections failed as "Duplicate" before 2026-10-24 re-sent, so the processor merges their missing girls | done 2026-11-19 |  | [2026-10-24-resend-duplicate-batches.md](2026-10-24-resend-duplicate-batches.md) |
 | 2026-10-24 | A Period date on the Monthly Report (DHIS2) records and in the Dhis2 report type, for the last-12-months period | done 2026-10-24 |  | [2026-10-24-dhis2-period-date.md](2026-10-24-dhis2-period-date.md) |
-| 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | in-progress |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
+| 2026-10-23 | Submission time, delay in days, session month and week on every attendance batch - four formula fields, then the reports and the dashboard that read them | done 2026-11-20 |  | [2026-10-23-submission-timing.md](2026-10-23-submission-timing.md) |
 | 2026-10-23 | Move the Monthly Report (DHIS2) reports and dashboards off the keep list to Decommissioned | done 2026-10-24 |  | [2026-10-23-sf-retire-reports.md](2026-10-23-sf-retire-reports.md) |
 | 2026-10-23 | Historical duplicate and obsolete Accounts and Contacts flagged by Batch Apex (RecordFlagBatch), the sheet's criteria carried by a read-only script writer | done 2026-10-26 |  | [2026-10-23-sf-record-flag-batch.md](2026-10-23-sf-record-flag-batch.md) |
 | 2026-10-23 | The kept Monthly Report reports and dashboards into one report folder and one dashboard folder | done |  | [2026-10-23-sf-category-folders.md](2026-10-23-sf-category-folders.md) |
@@ -57,7 +64,7 @@ names the BACKLOG items a plan is about. Newest first.
 | 2026-10-09 | Attendance reports and dashboard visible to every internal user - the two folders shared, one permission set, "(test)" dropped | in-progress | 60 | [2026-10-09-attendance-reports-public.md](2026-10-09-attendance-reports-public.md) |
 | 2026-10-07 | One Salesforce contact per girl - merge the duplicates the altered names made, then release Queens of Quest | done 2026-10-07 | 61, 76, 77, 78 | [2026-10-07-sf-duplicate-girls.md](2026-10-07-sf-duplicate-girls.md) |
 | 2026-10-07 | Attendance processor - a name with extra spaces or invisible characters finds its girl | done 2026-10-07 | 75 | [2026-10-07-processor-name-spacing.md](2026-10-07-processor-name-spacing.md) |
-| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | in-progress | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
+| 2026-10-06 | Salesforce club accounts created automatically for new clubs (BACKLOG 27) | done 2026-11-26 | 27 | [2026-10-06-sf-new-club-accounts.md](2026-10-06-sf-new-club-accounts.md) |
 | 2026-10-06 | The group photo never reaches Salesforce; it is kept where staff can find it, under GLOW's control | in-progress | 68, 69, 70 | [2026-10-06-photos-to-drive.md](2026-10-06-photos-to-drive.md) |
 | 2026-10-06 | The module a submission sends is one required dropdown and exact text | done 2026-10-07 | 66, 67 | [2026-10-06-module-selection.md](2026-10-06-module-selection.md) |
 | 2026-10-06 | Clubs that do not report through Jotform leave the forms - a Partners-tab marker for the three partners, deactivation of the U.S clubs, the U.S form disabled | in-progress | 71, 74 | [2026-10-06-clubs-off-jotform.md](2026-10-06-clubs-off-jotform.md) |

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""September 2026 back-fill, step one: every attendance submission as clean rows. READ-ONLY.
+"""Back-fill, step one: every attendance submission as clean rows. READ-ONLY.
 
 Reads every active submission of the four regional attendance forms (Jotform, GET only) and
-writes ONE ROW PER (submission, ticked roster) to data/backfill_2026-09/resolved.json, for the
-Salesforce loader (docs/plans/2026-09-30-backfill-resolver.md; RUNBOOK "September back-fill:
+writes ONE ROW PER (submission, ticked roster) to data/backfill_2026-09/resolved.json (or --out),
+for the Salesforce loader (docs/plans/2026-09-30-backfill-resolver.md; RUNBOOK "September back-fill:
 the resolver"). The club of a row is the roster the mentor TICKED girls in, never question 5:
 September's question 5 was typed, run together from several picked clubs, altered by page
 translation, or a bare name two clubs shared. What each roster is (club, partner, the Club Name
@@ -16,9 +16,16 @@ option's visible text, which a browser's page translation rewrote.
     python3 tools/backfill_resolve.py --roster data/roster_<date>.csv
     python3 tools/backfill_resolve.py --roster data/roster_<date>.csv --region Asia \
         --out data/backfill_2026-09/asia/resolved.json      # one region: never the loader's file
+    python3 tools/backfill_resolve.py --roster data/roster_<date>.csv \
+        --since '2026-11-13 01:00:00' --month-start 2026-11-01 \
+        --out data/backfill_2026-11/resolved.json           # an incident's window, its own folder
 
-A submission with no tick gets no row: its id is listed under no_ticks. Submissions created
-before 2026-09-01 00:00 US Eastern (Jotform's clock) are left out and counted. Every submission
+The window is September 2026's unless --since and --month-start say otherwise (another window
+needs --out: the default is September's file; the loader then takes that folder with --dir).
+Submissions created before --since ('yyyy-mm-dd hh:mm:ss' US Eastern, Jotform's clock; default
+2026-09-01 00:00:00) are left out and counted; a row whose attendance date is before
+--month-start (default 2026-09-01) is flagged date_before_2026_09, the loader's word whatever
+the month. A submission with no tick gets no row: its id is listed under no_ticks. Every submission
 in range is accounted for, or the tool exits with an error; it also exits, writing no result
 (the raw copies fetched so far stay, overwritten), when an answer cannot be resolved honestly
 (a shape it does not know, a ticked roster it cannot identify).
@@ -181,9 +188,14 @@ def is_long(value, club):
     return bool(value) and key(value) != key(club) and key(value).startswith(key(club) + SF_NAME_SEP)
 
 
-def resolve(region, form_id, submissions, questions, today, roster):
+def resolve(region, form_id, submissions, questions, today, roster, since=SINCE,
+            month_start=MONTH_START):
     """(rows, no_ticks, counts) for one form. submissions: as fetched, any status, any
-    date; questions: the form today; today: rosters_today(); roster: read_roster()."""
+    date; questions: the form today; today: rosters_today(); roster: read_roster(); since:
+    the cut-off, a created_at ('yyyy-mm-dd hh:mm:ss', US Eastern) - one before it is left out
+    and counted (pre_launch); month_start: 'yyyy-mm-dd' - a row's attendance date before it is
+    flagged date_before_2026_09 (the loader's word, whatever the month). Both are compared
+    as text: main() takes only that exact shape."""
     active, codes = roster.active, roster.codes
     picker = club_picker(questions)
     options = {qid: {o.strip() for o in (q.get("options") or "").split("|") if o.strip()}
@@ -209,7 +221,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
         when = sub.get("created_at")
         if not isinstance(when, str) or not CREATED.fullmatch(when):
             refuse(sub, "its created_at is not 'yyyy-mm-dd hh:mm:ss'")
-        if when < SINCE:
+        if when < since:
             pre_launch += 1
             continue
         created.append(when)
@@ -240,7 +252,7 @@ def resolve(region, form_id, submissions, questions, today, roster):
             shared.append("typed_era")
         if not date:
             shared.append("date_missing")
-        elif date < MONTH_START:
+        elif date < month_start:
             shared.append("date_before_2026_09")
         if verdicts["module"] != "same":
             # question 98 is not the module the dropdown holds (a browser's page translation
@@ -493,6 +505,21 @@ def write_json(path, payload):
         f.write("\n")
 
 
+def window_value(shape, fmt, what):
+    """An argparse type for --since / --month-start: exactly `shape` (two-digit fields, ASCII
+    digits) and a real date or time by `fmt`. resolve() compares the window as text, so any
+    other spelling of the same moment would cut in the wrong place: refused, never rewritten."""
+    def parse(value):
+        try:
+            if re.fullmatch(shape, value):
+                datetime.datetime.strptime(value, fmt)
+                return value
+        except ValueError:
+            pass
+        raise argparse.ArgumentTypeError(f"{value!r} is not {what}")
+    return parse
+
+
 def main(argv=None, client=None, plan_of=sync_plan):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--roster", required=True, metavar="CSV",
@@ -501,10 +528,20 @@ def main(argv=None, client=None, plan_of=sync_plan):
                     help="only this region (repeatable; default: all four - the loader wants all "
                          "four, so a run of fewer needs --out)")
     ap.add_argument("--out", metavar="PATH",
-                    help="the result (default data/backfill_2026-09/resolved.json); it holds names")
+                    help="the result (default data/backfill_2026-09/resolved.json, September's; "
+                         "another window needs its own folder, the loader's --dir); it holds names")
     ap.add_argument("--raw-dir", metavar="DIR",
                     help="where the raw copies go, <region>.json each, overwritten (default: raw/ "
                          "beside the result); they hold names")
+    ap.add_argument("--since", default=SINCE, metavar="'YYYY-MM-DD HH:MM:SS'",
+                    type=window_value(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}",
+                                      "%Y-%m-%d %H:%M:%S", "a real 'yyyy-mm-dd hh:mm:ss'"),
+                    help="the cut-off: a submission created before it is left out and counted "
+                         f"(created_at, US Eastern as Jotform gives it; default {SINCE})")
+    ap.add_argument("--month-start", default=MONTH_START, metavar="YYYY-MM-DD",
+                    type=window_value(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", "%Y-%m-%d", "a real 'yyyy-mm-dd'"),
+                    help="a row whose attendance date is before it is flagged date_before_2026_09 "
+                         f"(the loader's word, whatever the month; default {MONTH_START})")
     args = ap.parse_args(argv)
     if not os.path.exists(args.roster):
         sys.exit(f"No Roster export at {args.roster} - python3 tools/sheets_client.py export Roster <path>")
@@ -517,13 +554,17 @@ def main(argv=None, client=None, plan_of=sync_plan):
         sys.exit("--region gives a result without the other forms, and the default path is the file "
                  "the loader reads, with all four: add --out <another path under data/>, or run it "
                  "without --region")
+    if (args.since, args.month_start) != (SINCE, MONTH_START) and is_default:
+        sys.exit("--since / --month-start give another back-fill's result, and the default path is "
+                 "September's: add --out data/backfill_<when>/resolved.json (the loader's --dir)")
     raw_dir = private_place(args.raw_dir or os.path.join(os.path.dirname(out), "raw"), "A raw copy")
     if client is None:
         client = Client(api_key(" - docs/RUNBOOK.md, \"Credentials\""), retries=3)
 
     roster = read_roster(args.roster)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    print(f"Back-fill resolver (read-only): submissions created from {SINCE} US Eastern onward")
+    print(f"Back-fill resolver (read-only): submissions created from {args.since} US Eastern onward; "
+          f"an attendance date before {args.month_start} is flagged date_before_2026_09")
     print(f"Roster: {roster[0]} rows ({shown(args.roster)})   fetched {stamp}")
     result = {"fetched_at_utc": stamp, "resolver_commit": resolver_commit(),
               "roster_export": {"path": shown(args.roster), "rows": roster[0]},
@@ -546,7 +587,8 @@ def main(argv=None, client=None, plan_of=sync_plan):
                 print(f"   note: {region}'s form is not in step with this Roster export "
                       f"({len(plan['calls'])} planned writes, none made) - each roster's Club "
                       "Name is what it sends TODAY")
-        rows, no_ticks, counts = resolve(region, form_id, submissions, questions, today, roster)
+        rows, no_ticks, counts = resolve(region, form_id, submissions, questions, today, roster,
+                                         since=args.since, month_start=args.month_start)
         result["forms"][region] = counts
         result["no_ticks"][region] = no_ticks
         result["rows"] += rows

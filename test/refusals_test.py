@@ -311,6 +311,7 @@ class MinActiveFloor(unittest.TestCase):
                     mock.patch.object(auto_sync.Run, "sync", sync_), \
                     mock.patch.object(auto_sync.Run, "read_status", lambda self, form: "ENABLED"), \
                     mock.patch.object(auto_sync.Run, "check_storage", lambda self, read: None), \
+                    mock.patch.object(auto_sync.Run, "sf_watch", lambda self, org, now=None: None, create=True), \
                     contextlib.redirect_stdout(out):
                 try:
                     auto_sync.main()

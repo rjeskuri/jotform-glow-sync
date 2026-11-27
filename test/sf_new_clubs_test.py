@@ -299,6 +299,8 @@ class SalesforceNewClubs(Fixture):
                                         "Description": "GLOW club code DAWNCLUB; created by the automatic sync 2026-10-07"}])
         self.assertEqual(len(s.created), 1)
         self.assertTrue(any("check it by hand" in t for t, _ in s.attention) == sfn.CONFIRM_CREATES)
+        # a clean create raises nothing else: any ATTENTION item turns the auto-sync run red (exit 2)
+        self.assertEqual(len(s.attention), 1 if sfn.CONFIRM_CREATES else 0)
         # the next run finds it right: nothing more to create, the check is clean
         s2 = self.step(org)
         self.assertTrue(s2.prepare())
@@ -649,6 +651,8 @@ class AutoSyncSalesforce(unittest.TestCase):
                 run = self.run_obj(apply_salesforce=flag)
                 with self.mock.patch.dict(os.environ, {"SF_SYNC": sf_sync, **(env if creds else {})}, clear=True), \
                         self.mock.patch.object(sfn.Step, "prepare", lambda self: True), \
+                        self.mock.patch.object(self.auto_sync.Run, "sf_watch", lambda self, org, now=None: None,
+                                               create=True), \
                         self.mock.patch("builtins.print"):
                     run.sf_start(os.path.join(self.tmp.name, "roster.csv"))
                 self.assertEqual(run.sf.mode if run.sf else None, mode)
@@ -735,7 +739,10 @@ class AutoSyncSalesforce(unittest.TestCase):
         def boom(step):
             raise TypeError("unexpected")
         with self.mock.patch.dict(os.environ, {"SF_SYNC": "apply", "SF_CLIENT_ID": "i", "SF_CLIENT_SECRET": "s"}), \
-                self.mock.patch.object(sfn.Step, "prepare", boom), self.mock.patch("builtins.print"):
+                self.mock.patch.object(sfn.Step, "prepare", boom), \
+                self.mock.patch.object(self.auto_sync.Run, "sf_watch", lambda self, org, now=None: None,
+                                       create=True), \
+                self.mock.patch("builtins.print"):
             run.sf_start("roster.csv")
         self.assertIn("TypeError", run.sf.broken)
         self.assertTrue(any("not ready" in t for t, _ in run.sf.attention))
