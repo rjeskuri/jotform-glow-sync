@@ -7,6 +7,7 @@ processor where that matters.
 """
 import contextlib
 import csv
+import datetime
 import io
 import json
 import os
@@ -1142,6 +1143,202 @@ class SalesforceBackfillEdges(Harness, unittest.TestCase):
         self.assertGreater(len(self.org.seen), 10)
         for field in ("Name FROM Contact", "FirstName", "LastName", "Email", "Birthdate", "Contact__r.Name", "Contact_IDs__c"):
             self.assertNotIn(field, asked)
+
+
+# ---- snapshot: one aggregate answer holds at most 2,000 groups, and cannot be paged ---------------------
+def club(i):
+    """An invented Club account id, 18 characters as the API gives one."""
+    return "001000000%06dCLB" % i
+
+
+def wide_days():
+    """The days the wide org's attendance falls on: the first and last day of every month it touches, two
+    turns of a year (one of them before months without any attendance), and the Saturdays between."""
+    days = {"2025-12-31", "2026-01-01", "2026-09-01", "2026-09-30", "2026-10-01", "2026-10-31", "2026-11-01",
+            "2026-11-30", "2026-12-01", "2026-12-31", "2027-01-01", "2027-01-31"}
+    day = datetime.date(2026, 9, 5)
+    while day <= datetime.date(2027, 1, 30):
+        days.add(str(day))
+        day += datetime.timedelta(days=7)
+    return sorted(days)
+
+
+class WideOrg(FakeOrg):
+    """The fake org with attendance put in directly (no processor), and a read that can be made to fail: the
+    `fail_at_read`-th read of a run (a query or a count, from 1) gets no answer, as Salesforce's 503."""
+    fail_at_read = None
+    reads = 0
+
+    def read(self):
+        super().read()
+        self.reads += 1
+        if self.reads == self.fail_at_read:
+            raise bf.Refused("Salesforce did not answer a read (HTTP 503)")
+
+    def add_day(self, acc_id, day, n):
+        """n attendance rows of one club and day (None: rows without a date), each its own girl; a dated
+        club-day gets its batch."""
+        batch_id = None
+        if day is not None:
+            k = self.next_serial("batch")
+            batch_id = "a1l%015d" % k
+            self.batches.append({"Id": batch_id, "Name": "BATCH-%06d" % k, "Account__c": acc_id,
+                                 "Attendance_Date__c": day, "Processing_Status__c": "Success", "Creator__c": "Jotform",
+                                 "CreatedById": ME, "CreatedDate": "2026-09-30T14:00:00.000+0000"})
+        for _ in range(n):
+            k = self.next_serial("row")
+            self.rows.append({"Id": "a1m%015d" % k, "Attendance_Batch__c": batch_id, "Account__c": acc_id,
+                              "Attendance_Date__c": day, "Contact__c": "003ROW%012d" % k,
+                              "contact_created": "2026-09-01T00:00:00.000+0000",
+                              "CreatedDate": "2026-09-30T14:00:00.000+0000"})
+
+
+def partner_and_clubs(clubs, first=0, name="Wide Club"):
+    return [account(PARTNER, "Example Partner", PARTNER_RECORD_TYPE, None)] + \
+        [account(club(i), f"{name} {i}") for i in range(first, first + clubs)]
+
+
+def wide_org(clubs, shift, most=4):
+    """(a fake org whose attendance holds more club-days than one aggregate answer can - every month far under
+    2,000 - with more than 2,000 accounts and batches too, what a complete snapshot of it holds). The second is
+    worked out here, from the table that builds the org. `most`: the most attendance rows of one club-day."""
+    accounts = partner_and_clubs(clubs) + partner_and_clubs(2000, first=100000, name="Quiet Club")[1:]
+    participants = {club(i): 1 + (i + shift) % 6 for i in range(clubs) if (i + shift) % 5 != 4}
+    org = WideOrg(accounts, participants)
+    attendance = []
+    for i in range(clubs):
+        for j, day in enumerate(wide_days()):
+            if (i + j + shift) % 3:
+                attendance.append((club(i), day, 1 + (i + 2 * j + shift) % most))
+        if (i + shift) % 7 == 0:
+            attendance.append((club(i), None, 1 + i % 3))
+    for acc_id, day, n in attendance:
+        org.add_day(acc_id, day, n)
+    whole = {"accounts": sorted(accounts, key=lambda a: a["Id"]),
+             "batches": sorted(({k: b[k] for k in ("Id", "Name", "Account__c", "Attendance_Date__c",
+                                                    "Processing_Status__c")} for b in org.batches),
+                               key=lambda b: b["Id"]),
+             "attendance": sorted((a, d or "", n) for a, d, n in attendance),
+             "participants": sorted(participants.items())}
+    return org, whole
+
+
+def per_day(attendance):
+    """{day: (club-days, rows)} of (account, day, n) triples - where a lost or doubled window edge shows."""
+    out = {}
+    for _, day, n in attendance:
+        groups, rows = out.get(day, (0, 0))
+        out[day] = (groups + 1, rows + n)
+    return out
+
+
+class SnapshotWindows(Harness, unittest.TestCase):
+    """snapshot, found live 2026-11-27 ("Salesforce did not answer a read (HTTP 400)"): Salesforce refuses
+    an aggregate query whose answer would hold more than 2,000 groups (EXCEEDED_ID_LIMIT: an aggregate answer
+    cannot be paged), and the attendance one (club x day) passed 2,000. The snapshot must read its aggregates
+    so that no answer can exceed that and still give what one query would; refuse an answer that reaches
+    2,000 groups (it may be cut short - ruling for these tests: refused, not split further); and write nothing
+    when any read fails. The fake org answers as Salesforce does (test/helpers/fake_org.py AGGREGATE_ROWS)."""
+
+    EARLIER = b'{"read_at_utc": "2026-11-20T00:00:00Z", "note": "the last good snapshot"}'
+
+    def folder(self):
+        out = {}
+        for name in sorted(os.listdir(self.dir)):
+            with open(self.path(name), "rb") as fh:
+                out[name] = fh.read()
+        return out
+
+    def snapshot(self, org, keep):
+        """(the stop, the folder's files before the run); `keep`: an earlier snapshot is on disk."""
+        self.org = org
+        if keep:
+            with open(self.path("sf_state.json"), "wb") as fh:
+                fh.write(self.EARLIER)
+        elif os.path.exists(self.path("sf_state.json")):
+            os.remove(self.path("sf_state.json"))
+        before = self.folder()
+        return self.run_tool("snapshot", "--vpn-off")[1], before
+
+    def written(self):
+        with open(self.path("sf_state.json"), encoding="utf-8") as fh:
+            state = json.load(fh)
+        return {"accounts": sorted(state["accounts"], key=lambda a: a["Id"]),
+                "batches": sorted(state["batches"], key=lambda b: b["Id"]),
+                "attendance": sorted((a["Account__c"], a["Attendance_Date__c"] or "", a["n"])
+                                     for a in state["attendance"]),
+                "participants": sorted((p["AccountId"], p["n"]) for p in state["participants"])}
+
+    def assert_refused_and_untouched(self, stop, before, why):
+        self.assertIsNotNone(stop, why)
+        self.assertNotIn("unexpected", stop)             # a refusal, not a crash
+        self.assertEqual(self.folder(), before, "a refused snapshot wrote or changed a file")
+
+    def test_more_club_days_than_one_answer_holds_are_read_whole_and_each_counted_once(self):
+        for clubs, shift in ((100, 0), (130, 2)):
+            with self.subTest(clubs=clubs, shift=shift):
+                org, whole = wide_org(clubs, shift)
+                self.assertGreater(len(whole["attendance"]), 2000)       # the fixture: one query cannot answer it
+                stop, _ = self.snapshot(org, keep=bool(shift))
+                self.assertIsNone(stop, stop)
+                self.assertEqual(org.too_big, [], "sent an aggregate query Salesforce refuses for its size")
+                got = self.written()
+                self.assertEqual(per_day(got["attendance"]), per_day(whole["attendance"]))
+                self.assertEqual(got["attendance"], whole["attendance"])
+                self.assertEqual(got["participants"], whole["participants"])
+                self.assertEqual(got["accounts"], whole["accounts"])     # 2,000+ rows: a plain query pages
+                self.assertEqual(got["batches"], whole["batches"])
+                self.assertEqual(self.mode("sf_state.json"), 0o600)
+
+    def test_an_answer_that_reaches_2000_groups_is_refused_not_trusted_as_complete(self):
+        # 2,000 clubs on one day (or without a date): no date window can make that answer smaller
+        cases = (({"2026-10-17": 2000}, True), ({None: 2000}, True),
+                 ({"2026-10-17": 1999}, False), ({None: 1999}, False),
+                 ({"2026-12-31": 1000, "2027-01-01": 1000}, False),      # 2,000 in all, each month far under it
+                 ({"2026-11-30": 1200, None: 800}, False))
+        for days, refused in cases:
+            with self.subTest(days={d or "blank": n for d, n in days.items()}):
+                org = WideOrg(partner_and_clubs(max(days.values())))
+                attendance = []
+                for day, clubs in days.items():
+                    for i in range(clubs):
+                        n = 1 + (i + len(attendance)) % 3
+                        org.add_day(club(i), day, n)
+                        attendance.append((club(i), day or "", n))
+                stop, before = self.snapshot(org, keep=True)
+                if refused:
+                    self.assert_refused_and_untouched(stop, before, "an answer of 2,000 groups was taken as complete")
+                else:
+                    self.assertIsNone(stop, stop)
+                    self.assertEqual(self.written()["attendance"], sorted(attendance))
+
+    def test_participants_of_2000_clubs_are_refused_even_as_one_query(self):
+        for clubs, refused in ((1999, False), (2000, True), (2001, True)):
+            with self.subTest(clubs=clubs):
+                participants = {club(i): 1 + i % 4 for i in range(clubs)}
+                org = WideOrg(partner_and_clubs(clubs), participants)
+                org.add_day(club(0), "2026-10-17", 2)
+                stop, before = self.snapshot(org, keep=bool(clubs % 2))
+                if refused:
+                    self.assert_refused_and_untouched(stop, before, f"participants of {clubs} clubs taken as complete")
+                else:
+                    self.assertIsNone(stop, stop)
+                    self.assertEqual(self.written()["participants"], sorted(participants.items()))
+
+    def test_a_read_that_fails_anywhere_leaves_the_folder_as_it_was(self):
+        org, whole = wide_org(100, 0, most=1)          # one row per club-day keeps the many runs quick
+        stop, _ = self.snapshot(org, keep=False)
+        self.assertIsNone(stop, stop)                     # the control: the whole org reads
+        self.assertEqual(self.written()["attendance"], whole["attendance"])
+        reads = org.reads
+        # every read, or the first, the last and a dozen spread between when there are many
+        for at in sorted({1, reads} | set(range(1, reads + 1, max(1, reads // 12)))):
+            for keep in (False, True):
+                with self.subTest(failing_read=at, of=reads, earlier_snapshot=keep):
+                    org.reads, org.fail_at_read = 0, at
+                    stop, before = self.snapshot(org, keep=keep)
+                    self.assertGreaterEqual(org.reads, at)
+                    self.assert_refused_and_untouched(stop, before, f"read {at} of {reads} failed and it went on")
 
 
 if __name__ == "__main__":
